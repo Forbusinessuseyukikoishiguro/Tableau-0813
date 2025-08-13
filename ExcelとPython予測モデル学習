@@ -1,0 +1,439 @@
+# PythonでExcelデータを使った予測モデル作成
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
+
+# 機械学習・予測ライブラリ
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.exponential_smoothing.exponential_smoothing import ExponentialSmoothing
+
+# ========================================
+# 1. Excelデータの読み込みと前処理
+# ========================================
+
+def load_excel_data(file_path, sheet_name=0):
+    """
+    Excelファイルを読み込み、基本的な前処理を行う
+    
+    Parameters:
+    file_path: Excelファイルのパス
+    sheet_name: シート名またはインデックス
+    """
+    try:
+        # Excelファイル読み込み
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        
+        print(f"データ形状: {df.shape}")
+        print(f"列名: {list(df.columns)}")
+        print("\n基本統計:")
+        print(df.describe())
+        
+        return df
+    
+    except Exception as e:
+        print(f"ファイル読み込みエラー: {e}")
+        return None
+
+def preprocess_data(df, date_column, target_column):
+    """
+    時系列データの前処理
+    
+    Parameters:
+    df: データフレーム
+    date_column: 日付列名
+    target_column: 予測対象列名
+    """
+    # データのコピー
+    data = df.copy()
+    
+    # 日付列の変換
+    data[date_column] = pd.to_datetime(data[date_column])
+    
+    # 日付でソート
+    data = data.sort_values(date_column)
+    
+    # 欠損値処理
+    print(f"欠損値数: {data[target_column].isnull().sum()}")
+    
+    # 前方補完
+    data[target_column] = data[target_column].fillna(method='ffill')
+    
+    # インデックスを日付に設定
+    data.set_index(date_column, inplace=True)
+    
+    return data
+
+# ========================================
+# 2. 探索的データ分析（EDA）
+# ========================================
+
+def exploratory_analysis(data, target_column):
+    """
+    時系列データの探索的分析
+    """
+    plt.figure(figsize=(15, 10))
+    
+    # 1. 時系列プロット
+    plt.subplot(2, 2, 1)
+    plt.plot(data.index, data[target_column])
+    plt.title('時系列データ')
+    plt.xticks(rotation=45)
+    
+    # 2. ヒストグラム
+    plt.subplot(2, 2, 2)
+    plt.hist(data[target_column], bins=30, alpha=0.7)
+    plt.title('データ分布')
+    
+    # 3. 季節性分解
+    if len(data) >= 24:  # 最低2年分のデータが必要
+        decomposition = seasonal_decompose(data[target_column], model='additive', period=12)
+        
+        plt.subplot(2, 2, 3)
+        plt.plot(decomposition.trend)
+        plt.title('トレンド成分')
+        
+        plt.subplot(2, 2, 4)
+        plt.plot(decomposition.seasonal)
+        plt.title('季節成分')
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 統計情報
+    print(f"平均: {data[target_column].mean():.2f}")
+    print(f"標準偏差: {data[target_column].std():.2f}")
+    print(f"最小値: {data[target_column].min():.2f}")
+    print(f"最大値: {data[target_column].max():.2f}")
+
+# ========================================
+# 3. 特徴量エンジニアリング
+# ========================================
+
+def create_features(data, target_column):
+    """
+    時系列予測用の特徴量を作成
+    """
+    df = data.copy()
+    
+    # 時間関連の特徴量
+    df['year'] = df.index.year
+    df['month'] = df.index.month
+    df['quarter'] = df.index.quarter
+    df['day_of_year'] = df.index.dayofyear
+    df['week_of_year'] = df.index.isocalendar().week
+    
+    # ラグ特徴量（過去の値）
+    for lag in [1, 2, 3, 6, 12]:
+        df[f'lag_{lag}'] = df[target_column].shift(lag)
+    
+    # 移動平均
+    for window in [3, 6, 12]:
+        df[f'ma_{window}'] = df[target_column].rolling(window=window).mean()
+    
+    # 差分特徴量
+    df['diff_1'] = df[target_column].diff(1)
+    df['diff_12'] = df[target_column].diff(12)
+    
+    # 季節性特徴量
+    df['sin_month'] = np.sin(2 * np.pi * df['month'] / 12)
+    df['cos_month'] = np.cos(2 * np.pi * df['month'] / 12)
+    
+    # 欠損値を削除
+    df = df.dropna()
+    
+    return df
+
+# ========================================
+# 4. 複数の予測モデル
+# ========================================
+
+class ForecastModels:
+    def __init__(self):
+        self.models = {}
+        self.results = {}
+    
+    def linear_regression_forecast(self, train_data, test_data, target_column, feature_columns):
+        """線形回帰による予測"""
+        X_train = train_data[feature_columns]
+        y_train = train_data[target_column]
+        X_test = test_data[feature_columns]
+        
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        
+        predictions = model.predict(X_test)
+        
+        self.models['linear_regression'] = model
+        return predictions
+    
+    def random_forest_forecast(self, train_data, test_data, target_column, feature_columns):
+        """ランダムフォレストによる予測"""
+        X_train = train_data[feature_columns]
+        y_train = train_data[target_column]
+        X_test = test_data[feature_columns]
+        
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        
+        predictions = model.predict(X_test)
+        
+        self.models['random_forest'] = model
+        return predictions
+    
+    def arima_forecast(self, train_data, target_column, forecast_periods):
+        """ARIMAモデルによる予測"""
+        train_series = train_data[target_column]
+        
+        # 自動でARIMAパラメータを選択
+        model = ARIMA(train_series, order=(1, 1, 1))
+        fitted_model = model.fit()
+        
+        # 予測
+        forecast = fitted_model.forecast(steps=forecast_periods)
+        
+        self.models['arima'] = fitted_model
+        return forecast
+    
+    def exponential_smoothing_forecast(self, train_data, target_column, forecast_periods):
+        """指数平滑法による予測"""
+        train_series = train_data[target_column]
+        
+        model = ExponentialSmoothing(
+            train_series,
+            trend='add',
+            seasonal='add',
+            seasonal_periods=12
+        )
+        fitted_model = model.fit()
+        
+        forecast = fitted_model.forecast(steps=forecast_periods)
+        
+        self.models['exponential_smoothing'] = fitted_model
+        return forecast
+
+# ========================================
+# 5. モデル評価
+# ========================================
+
+def evaluate_model(actual, predicted, model_name):
+    """
+    予測モデルの評価指標を計算
+    """
+    mae = mean_absolute_error(actual, predicted)
+    mse = mean_squared_error(actual, predicted)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(actual, predicted)
+    mape = np.mean(np.abs((actual - predicted) / actual)) * 100
+    
+    results = {
+        'Model': model_name,
+        'MAE': mae,
+        'MSE': mse,
+        'RMSE': rmse,
+        'R²': r2,
+        'MAPE': mape
+    }
+    
+    return results
+
+def compare_models(results_list):
+    """
+    複数モデルの結果を比較
+    """
+    comparison_df = pd.DataFrame(results_list)
+    
+    # 結果をソート（RMSEの昇順）
+    comparison_df = comparison_df.sort_values('RMSE')
+    
+    print("モデル比較結果:")
+    print(comparison_df.round(4))
+    
+    return comparison_df
+
+# ========================================
+# 6. 予測結果の可視化
+# ========================================
+
+def plot_forecast_results(train_data, test_data, predictions_dict, target_column):
+    """
+    予測結果をプロット
+    """
+    plt.figure(figsize=(15, 8))
+    
+    # 訓練データ
+    plt.plot(train_data.index, train_data[target_column], 
+             label='Training Data', color='blue', alpha=0.7)
+    
+    # 実際のテストデータ
+    plt.plot(test_data.index, test_data[target_column], 
+             label='Actual', color='green', linewidth=2)
+    
+    # 各モデルの予測結果
+    colors = ['red', 'orange', 'purple', 'brown']
+    for i, (model_name, predictions) in enumerate(predictions_dict.items()):
+        plt.plot(test_data.index, predictions, 
+                 label=f'{model_name} Prediction', 
+                 color=colors[i % len(colors)], 
+                 linestyle='--', linewidth=2)
+    
+    plt.title('予測結果比較')
+    plt.xlabel('日付')
+    plt.ylabel('値')
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+# ========================================
+# 7. 将来予測
+# ========================================
+
+def future_forecast(model, data, target_column, periods=12):
+    """
+    将来の予測を実行
+    """
+    # 最新データポイントから将来の日付を生成
+    last_date = data.index[-1]
+    future_dates = pd.date_range(start=last_date + pd.DateOffset(months=1), 
+                                periods=periods, freq='M')
+    
+    if hasattr(model, 'forecast'):
+        # ARIMAまたは指数平滑法の場合
+        future_values = model.forecast(steps=periods)
+    else:
+        # 機械学習モデルの場合
+        # 特徴量を作成して予測（簡略化された例）
+        # 実際にはより複雑な特徴量エンジニアリングが必要
+        future_values = np.random.normal(data[target_column].mean(), 
+                                       data[target_column].std(), periods)
+    
+    future_df = pd.DataFrame({
+        'date': future_dates,
+        'predicted_value': future_values
+    })
+    
+    return future_df
+
+# ========================================
+# 8. メイン実行関数
+# ========================================
+
+def main_forecast_pipeline(excel_file_path, sheet_name, date_column, target_column):
+    """
+    予測モデル作成のメインパイプライン
+    """
+    print("=== Excelデータ予測モデル作成 ===\n")
+    
+    # 1. データ読み込み
+    print("1. データ読み込み...")
+    df = load_excel_data(excel_file_path, sheet_name)
+    if df is None:
+        return
+    
+    # 2. 前処理
+    print("\n2. データ前処理...")
+    processed_data = preprocess_data(df, date_column, target_column)
+    
+    # 3. 探索的分析
+    print("\n3. 探索的データ分析...")
+    exploratory_analysis(processed_data, target_column)
+    
+    # 4. 特徴量作成
+    print("\n4. 特徴量エンジニアリング...")
+    featured_data = create_features(processed_data, target_column)
+    
+    # 5. 訓練・テストデータ分割
+    split_point = int(len(featured_data) * 0.8)
+    train_data = featured_data[:split_point]
+    test_data = featured_data[split_point:]
+    
+    print(f"訓練データ: {len(train_data)}行")
+    print(f"テストデータ: {len(test_data)}行")
+    
+    # 6. モデル訓練・予測
+    print("\n5. モデル訓練・予測...")
+    forecast_models = ForecastModels()
+    
+    # 特徴量列を選択
+    feature_columns = ['year', 'month', 'quarter', 'lag_1', 'lag_2', 'lag_3', 
+                      'ma_3', 'ma_6', 'sin_month', 'cos_month']
+    # 存在する列のみを使用
+    available_features = [col for col in feature_columns if col in featured_data.columns]
+    
+    predictions = {}
+    results = []
+    
+    # 線形回帰
+    try:
+        lr_pred = forecast_models.linear_regression_forecast(
+            train_data, test_data, target_column, available_features)
+        predictions['Linear Regression'] = lr_pred
+        results.append(evaluate_model(test_data[target_column], lr_pred, 'Linear Regression'))
+    except Exception as e:
+        print(f"線形回帰エラー: {e}")
+    
+    # ランダムフォレスト
+    try:
+        rf_pred = forecast_models.random_forest_forecast(
+            train_data, test_data, target_column, available_features)
+        predictions['Random Forest'] = rf_pred
+        results.append(evaluate_model(test_data[target_column], rf_pred, 'Random Forest'))
+    except Exception as e:
+        print(f"ランダムフォレストエラー: {e}")
+    
+    # ARIMA
+    try:
+        arima_pred = forecast_models.arima_forecast(
+            train_data, target_column, len(test_data))
+        predictions['ARIMA'] = arima_pred
+        results.append(evaluate_model(test_data[target_column], arima_pred, 'ARIMA'))
+    except Exception as e:
+        print(f"ARIMAエラー: {e}")
+    
+    # 7. モデル評価
+    print("\n6. モデル評価...")
+    if results:
+        comparison_df = compare_models(results)
+        
+        # 8. 結果可視化
+        print("\n7. 結果可視化...")
+        plot_forecast_results(train_data, test_data, predictions, target_column)
+        
+        # 9. 将来予測
+        print("\n8. 将来予測...")
+        best_model_name = comparison_df.iloc[0]['Model']
+        best_model = forecast_models.models.get(best_model_name.lower().replace(' ', '_'))
+        
+        if best_model:
+            future_pred = future_forecast(best_model, processed_data, target_column, 12)
+            print("将来12ヶ月の予測:")
+            print(future_pred)
+    
+    return forecast_models, comparison_df if results else None
+
+# ========================================
+# 使用例
+# ========================================
+
+# 実際の使用方法
+"""
+# Excelファイルのパスを指定
+excel_file = "your_data.xlsx"
+sheet_name = "Sheet1"  # またはシートのインデックス番号
+date_column = "Date"   # 日付列の名前
+target_column = "Sales"  # 予測対象列の名前
+
+# 予測モデル実行
+models, results = main_forecast_pipeline(excel_file, sheet_name, date_column, target_column)
+"""
