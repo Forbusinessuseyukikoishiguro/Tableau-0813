@@ -1,0 +1,721 @@
+# Tableau + Python予測モデル作成 完全ガイド
+
+## 🐍 1. Python環境セットアップ
+
+### 1.1 必要ライブラリのインストール
+```bash
+# TabPy（Tableau-Python連携）
+pip install tabpy
+
+# 機械学習・予測ライブラリ
+pip install pandas numpy scikit-learn
+pip install statsmodels pmdarima
+pip install matplotlib seaborn
+pip install tensorflow keras  # ディープラーニング用（オプション）
+
+# 追加の便利ライブラリ
+pip install plotly fbprophet xgboost lightgbm
+```
+
+### 1.2 TabPyサーバー起動
+```bash
+# ターミナルでTabPyサーバーを起動
+tabpy
+
+# または詳細設定で起動
+tabpy --config=config.conf
+```
+
+### 1.3 Tableau設定
+```
+1. Tableau Desktop を開く
+2. ヘルプ → 設定とパフォーマンス → 拡張機能接続の管理
+3. TabPy/External API設定:
+   - サーバー: localhost
+   - ポート: 9004
+   - サインインが必要: チェックしない
+```
+
+---
+
+## 🚀 2. 基本的なPython予測スクリプト
+
+### 2.1 シンプルな線形回帰予測
+```python
+# Tableau計算フィールド: [Linear_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+
+# Tableauからのデータを受け取り
+sales_data = _arg1
+dates = _arg2
+
+# データフレーム作成
+df = pd.DataFrame({
+    'sales': sales_data,
+    'time_index': range(len(sales_data))
+})
+
+# モデル学習
+X = df[['time_index']]
+y = df['sales']
+model = LinearRegression()
+model.fit(X, y)
+
+# 将来12期間の予測
+future_periods = 12
+future_X = np.array(range(len(sales_data), len(sales_data) + future_periods)).reshape(-1, 1)
+predictions = model.predict(future_X)
+
+return predictions.tolist()
+", SUM([Sales]), [Date])
+```
+
+### 2.2 ARIMA時系列予測
+```python
+# Tableau計算フィールド: [ARIMA_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
+import warnings
+warnings.filterwarnings('ignore')
+
+# データ準備
+sales_data = pd.Series(_arg1)
+
+# ARIMAモデル（自動パラメータ選択）
+try:
+    model = ARIMA(sales_data, order=(1,1,1))
+    fitted_model = model.fit()
+    
+    # 12期間先の予測
+    forecast = fitted_model.forecast(steps=12)
+    confidence_intervals = fitted_model.get_forecast(steps=12).conf_int()
+    
+    return forecast.tolist()
+except:
+    # エラー時は移動平均で代替
+    return [sales_data.mean()] * 12
+", SUM([Sales]))
+```
+
+### 2.3 機械学習（Random Forest）予測
+```python
+# Tableau計算フィールド: [ML_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+# 特徴量エンジニアリング
+def create_features(data):
+    df = pd.DataFrame({'value': data})
+    df['lag_1'] = df['value'].shift(1)
+    df['lag_3'] = df['value'].shift(3)
+    df['lag_12'] = df['value'].shift(12)
+    df['ma_3'] = df['value'].rolling(3).mean()
+    df['ma_12'] = df['value'].rolling(12).mean()
+    df['trend'] = range(len(df))
+    df['season'] = [i % 12 for i in range(len(df))]
+    return df.fillna(method='bfill').fillna(method='ffill')
+
+# データ準備
+sales_data = _arg1
+df = create_features(sales_data)
+
+# モデル学習
+feature_cols = ['lag_1', 'lag_3', 'lag_12', 'ma_3', 'ma_12', 'trend', 'season']
+X = df[feature_cols]
+y = df['value']
+
+# 最新データでモデル学習
+model = RandomForestRegressor(n_estimators=50, random_state=42)
+model.fit(X, y)
+
+# 将来予測（逐次予測）
+predictions = []
+last_features = X.iloc[-1].copy()
+
+for i in range(12):
+    pred = model.predict([last_features])[0]
+    predictions.append(pred)
+    
+    # 特徴量更新
+    last_features['lag_1'] = pred
+    last_features['trend'] += 1
+    last_features['season'] = (last_features['season'] + 1) % 12
+
+return predictions
+", SUM([Sales]))
+```
+
+---
+
+## 📊 3. 高度なPython予測モデル
+
+### 3.1 Facebook Prophet（季節性特化）
+```python
+# 事前にTabPyサーバーにProphetをデプロイ
+# Tableau計算フィールド: [Prophet_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from fbprophet import Prophet
+import warnings
+warnings.filterwarnings('ignore')
+
+# データ準備（Prophetの形式に変換）
+dates = pd.to_datetime(_arg1)
+sales = _arg2
+
+df = pd.DataFrame({
+    'ds': dates,
+    'y': sales
+})
+
+# Prophetモデル
+model = Prophet(
+    yearly_seasonality=True,
+    weekly_seasonality=False,
+    daily_seasonality=False,
+    changepoint_prior_scale=0.05
+)
+
+model.fit(df)
+
+# 将来12ヶ月の予測
+future = model.make_future_dataframe(periods=12, freq='M')
+forecast = model.predict(future)
+
+# 予測値のみを返す（最後の12個）
+return forecast['yhat'].tail(12).tolist()
+", [Date], SUM([Sales]))
+```
+
+### 3.2 XGBoost（高精度機械学習）
+```python
+# Tableau計算フィールド: [XGBoost_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+import xgboost as xgb
+from sklearn.metrics import mean_squared_error
+
+def engineer_features(data, window_sizes=[3, 6, 12]):
+    df = pd.DataFrame({'target': data})
+    
+    # ラグ特徴量
+    for lag in [1, 2, 3, 6, 12]:
+        df[f'lag_{lag}'] = df['target'].shift(lag)
+    
+    # 移動平均
+    for window in window_sizes:
+        df[f'ma_{window}'] = df['target'].rolling(window).mean()
+        df[f'std_{window}'] = df['target'].rolling(window).std()
+    
+    # 差分特徴量
+    df['diff_1'] = df['target'].diff(1)
+    df['diff_12'] = df['target'].diff(12)
+    
+    # 時間特徴量
+    df['time_idx'] = range(len(df))
+    df['month'] = [i % 12 for i in range(len(df))]
+    df['quarter'] = [(i // 3) % 4 for i in range(len(df))]
+    
+    return df
+
+# データ準備
+sales_data = _arg1
+df = engineer_features(sales_data)
+
+# 欠損値処理
+df = df.fillna(method='bfill').fillna(method='ffill')
+
+# 特徴量とターゲット分離
+feature_cols = [col for col in df.columns if col != 'target']
+X = df[feature_cols]
+y = df['target']
+
+# XGBoostモデル
+model = xgb.XGBRegressor(
+    n_estimators=100,
+    max_depth=6,
+    learning_rate=0.1,
+    random_state=42
+)
+
+model.fit(X, y)
+
+# 逐次予測
+predictions = []
+last_row = X.iloc[-1].copy()
+
+for step in range(12):
+    pred = model.predict([last_row])[0]
+    predictions.append(pred)
+    
+    # 特徴量更新（簡略化）
+    last_row['lag_1'] = pred
+    last_row['time_idx'] += 1
+    last_row['month'] = (last_row['month'] + 1) % 12
+    
+return predictions
+", SUM([Sales]))
+```
+
+### 3.3 LSTM（ディープラーニング）
+```python
+# Tableau計算フィールド: [LSTM_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from sklearn.preprocessing import MinMaxScaler
+import warnings
+warnings.filterwarnings('ignore')
+
+def create_sequences(data, seq_length=12):
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(data.reshape(-1, 1))
+    
+    X, y = [], []
+    for i in range(seq_length, len(scaled_data)):
+        X.append(scaled_data[i-seq_length:i, 0])
+        y.append(scaled_data[i, 0])
+    
+    return np.array(X), np.array(y), scaler
+
+# データ準備
+sales_data = np.array(_arg1)
+
+if len(sales_data) < 24:
+    # データ不足時は移動平均で代替
+    return [np.mean(sales_data)] * 12
+
+X, y, scaler = create_sequences(sales_data, seq_length=12)
+
+# LSTMモデル
+model = Sequential([
+    LSTM(50, return_sequences=True, input_shape=(12, 1)),
+    LSTM(50, return_sequences=False),
+    Dense(25),
+    Dense(1)
+])
+
+model.compile(optimizer='adam', loss='mean_squared_error')
+
+# 訓練
+X = X.reshape((X.shape[0], X.shape[1], 1))
+model.fit(X, y, epochs=50, batch_size=32, verbose=0)
+
+# 予測
+last_sequence = sales_data[-12:].reshape(1, 12, 1)
+last_sequence_scaled = scaler.transform(last_sequence.reshape(-1, 1)).reshape(1, 12, 1)
+
+predictions_scaled = []
+current_seq = last_sequence_scaled
+
+for _ in range(12):
+    pred = model.predict(current_seq, verbose=0)[0][0]
+    predictions_scaled.append(pred)
+    
+    # シーケンス更新
+    current_seq = np.roll(current_seq, -1, axis=1)
+    current_seq[0, -1, 0] = pred
+
+# スケール戻し
+predictions = scaler.inverse_transform(np.array(predictions_scaled).reshape(-1, 1)).flatten()
+
+return predictions.tolist()
+", SUM([Sales]))
+```
+
+---
+
+## 🎯 4. 複数モデル比較・アンサンブル
+
+### 4.1 モデル精度比較
+```python
+# Tableau計算フィールド: [Model_Accuracy]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+def calculate_accuracy_metrics(actual, predicted):
+    mae = mean_absolute_error(actual, predicted)
+    mse = mean_squared_error(actual, predicted)
+    rmse = np.sqrt(mse)
+    mape = np.mean(np.abs((actual - predicted) / actual)) * 100
+    
+    return {
+        'MAE': mae,
+        'MSE': mse, 
+        'RMSE': rmse,
+        'MAPE': mape
+    }
+
+# 実際の値と予測値
+actual_values = _arg1
+predictions = _arg2
+
+metrics = calculate_accuracy_metrics(actual_values, predictions)
+
+# MAPEを返す（パーセンテージ）
+return metrics['MAPE']
+", [Actual], [Predicted])
+```
+
+### 4.2 アンサンブル予測
+```python
+# Tableau計算フィールド: [Ensemble_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from statsmodels.tsa.exponential_smoothing.exponential_smoothing import ExponentialSmoothing
+
+def ensemble_forecast(sales_data, n_periods=12):
+    # モデル1: 線形回帰
+    X_linear = np.array(range(len(sales_data))).reshape(-1, 1)
+    model_linear = LinearRegression()
+    model_linear.fit(X_linear, sales_data)
+    
+    future_X = np.array(range(len(sales_data), len(sales_data) + n_periods)).reshape(-1, 1)
+    pred_linear = model_linear.predict(future_X)
+    
+    # モデル2: 指数平滑法
+    try:
+        model_exp = ExponentialSmoothing(sales_data, trend='add', seasonal='add', seasonal_periods=12)
+        fitted_exp = model_exp.fit()
+        pred_exp = fitted_exp.forecast(n_periods)
+    except:
+        pred_exp = [np.mean(sales_data)] * n_periods
+    
+    # モデル3: Random Forest
+    def create_features(data):
+        features = []
+        for i in range(12, len(data)):
+            features.append(data[i-12:i])
+        return np.array(features)
+    
+    if len(sales_data) >= 24:
+        X_rf = create_features(sales_data)
+        y_rf = sales_data[12:]
+        
+        model_rf = RandomForestRegressor(n_estimators=50, random_state=42)
+        model_rf.fit(X_rf, y_rf)
+        
+        last_window = sales_data[-12:]
+        pred_rf = []
+        
+        for _ in range(n_periods):
+            pred = model_rf.predict([last_window])[0]
+            pred_rf.append(pred)
+            last_window = np.append(last_window[1:], pred)
+    else:
+        pred_rf = [np.mean(sales_data)] * n_periods
+    
+    # アンサンブル（重み付き平均）
+    weights = [0.3, 0.4, 0.3]  # linear, exp, rf
+    ensemble_pred = []
+    
+    for i in range(n_periods):
+        weighted_pred = (
+            weights[0] * pred_linear[i] +
+            weights[1] * pred_exp[i] +
+            weights[2] * pred_rf[i]
+        )
+        ensemble_pred.append(weighted_pred)
+    
+    return ensemble_pred
+
+sales_data = _arg1
+predictions = ensemble_forecast(sales_data, 12)
+
+return predictions
+", SUM([Sales]))
+```
+
+---
+
+## 📈 5. 動的パラメータ調整
+
+### 5.1 パラメータ付き予測
+```python
+# Tableauパラメータを使用した動的予測
+# パラメータ: [Forecast_Periods], [Model_Type]
+
+# 計算フィールド: [Dynamic_Forecast]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+
+def dynamic_forecast(sales_data, periods, model_type):
+    if model_type == 'Linear':
+        X = np.array(range(len(sales_data))).reshape(-1, 1)
+        model = LinearRegression()
+        model.fit(X, sales_data)
+        
+        future_X = np.array(range(len(sales_data), len(sales_data) + periods)).reshape(-1, 1)
+        predictions = model.predict(future_X)
+        
+    elif model_type == 'RandomForest':
+        # 特徴量エンジニアリング
+        df = pd.DataFrame({'sales': sales_data})
+        df['lag1'] = df['sales'].shift(1)
+        df['ma3'] = df['sales'].rolling(3).mean()
+        df['trend'] = range(len(df))
+        df = df.fillna(method='bfill')
+        
+        X = df[['lag1', 'ma3', 'trend']]
+        y = df['sales']
+        
+        model = RandomForestRegressor(n_estimators=50)
+        model.fit(X, y)
+        
+        # 逐次予測
+        predictions = []
+        last_features = X.iloc[-1].copy()
+        
+        for i in range(periods):
+            pred = model.predict([last_features])[0]
+            predictions.append(pred)
+            
+            last_features['lag1'] = pred
+            last_features['trend'] += 1
+            
+    else:  # デフォルト：移動平均
+        predictions = [np.mean(sales_data[-12:])] * periods
+    
+    return predictions
+
+sales_data = _arg1
+periods = int(_arg2)
+model_type = _arg3
+
+result = dynamic_forecast(sales_data, periods, model_type)
+return result
+", SUM([Sales]), [Forecast_Periods], [Model_Type])
+```
+
+### 5.2 信頼区間付き予測
+```python
+# 計算フィールド: [Forecast_Upper_Bound]
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+
+def forecast_with_uncertainty(sales_data, confidence_level=0.95):
+    # Bootstrap法による不確実性推定
+    n_bootstrap = 100
+    predictions_bootstrap = []
+    
+    for _ in range(n_bootstrap):
+        # ブートストラップサンプリング
+        indices = np.random.choice(len(sales_data), len(sales_data), replace=True)
+        bootstrap_data = [sales_data[i] for i in indices]
+        
+        # 簡単な線形予測
+        X = np.array(range(len(bootstrap_data))).reshape(-1, 1)
+        model = LinearRegression()
+        model.fit(X, bootstrap_data)
+        
+        future_X = np.array([len(bootstrap_data)]).reshape(-1, 1)
+        pred = model.predict(future_X)[0]
+        predictions_bootstrap.append(pred)
+    
+    # 信頼区間計算
+    alpha = 1 - confidence_level
+    lower_percentile = (alpha/2) * 100
+    upper_percentile = (1 - alpha/2) * 100
+    
+    lower_bound = np.percentile(predictions_bootstrap, lower_percentile)
+    upper_bound = np.percentile(predictions_bootstrap, upper_percentile)
+    mean_pred = np.mean(predictions_bootstrap)
+    
+    return [mean_pred, lower_bound, upper_bound]
+
+from sklearn.linear_model import LinearRegression
+
+sales_data = _arg1
+result = forecast_with_uncertainty(sales_data)
+
+# 上限値を返す
+return result[2]
+", SUM([Sales]))
+```
+
+---
+
+## 🎨 6. ダッシュボード統合
+
+### 6.1 Python予測結果の可視化
+
+#### メインチャート設定
+```
+列: [Date]
+行: [Sales], [Python_Forecast]
+マーク: 線グラフ
+色分け: 実績 vs 予測
+```
+
+#### 予測精度パネル
+```sql
+-- MAPE表示
+ROUND([Model_Accuracy], 2)
+
+-- 精度評価
+IF [Model_Accuracy] <= 10 THEN "優秀"
+ELSEIF [Model_Accuracy] <= 20 THEN "良好"  
+ELSEIF [Model_Accuracy] <= 30 THEN "普通"
+ELSE "要改善"
+END
+```
+
+### 6.2 モデル選択インターフェース
+
+#### パラメータ設定
+```
+[Model_Type]: Linear, RandomForest, ARIMA, Ensemble
+[Forecast_Periods]: 1〜24
+[Confidence_Level]: 80%, 90%, 95%
+```
+
+#### 動的更新
+```sql
+-- 選択されたモデルに応じて予測実行
+CASE [Model_Type]
+WHEN "Linear" THEN [Linear_Forecast]
+WHEN "RandomForest" THEN [ML_Forecast]  
+WHEN "ARIMA" THEN [ARIMA_Forecast]
+ELSE [Ensemble_Forecast]
+END
+```
+
+---
+
+## 🚀 7. 本番運用とスケーリング
+
+### 7.1 TabPyサーバー最適化
+
+#### サーバー設定ファイル（config.conf）
+```ini
+[TabPy]
+TABPY_PORT = 9004
+TABPY_QUERY_OBJECT_PATH = /tmp/query_objects
+TABPY_STATE_PATH = ./tabpy-server
+
+[logging]
+TABPY_LOG_LEVEL = INFO
+```
+
+#### パフォーマンス改善
+```python
+# モデルのキャッシュ化
+import pickle
+import os
+
+def cached_model_predict(data, model_path='forecast_model.pkl'):
+    if os.path.exists(model_path):
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+    else:
+        # モデル学習
+        model = train_new_model(data)
+        with open(model_path, 'wb') as f:
+            pickle.dump(model, f)
+    
+    return model.predict(data)
+```
+
+### 7.2 エラーハンドリング
+```python
+# 堅牢な予測関数
+SCRIPT_REAL("
+import pandas as pd
+import numpy as np
+
+def robust_forecast(sales_data):
+    try:
+        # メイン予測ロジック
+        from sklearn.ensemble import RandomForestRegressor
+        # ... 予測処理
+        return predictions
+    
+    except ImportError:
+        # ライブラリ不足時の代替処理
+        return [np.mean(sales_data)] * 12
+    
+    except Exception as e:
+        # その他のエラー時
+        return [sales_data[-1]] * 12  # 最後の値を繰り返し
+
+sales_data = _arg1
+result = robust_forecast(sales_data)
+return result
+", SUM([Sales]))
+```
+
+### 7.3 監視とログ
+```python
+# ログ付き予測
+SCRIPT_REAL("
+import logging
+import datetime
+
+# ログ設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def logged_forecast(sales_data):
+    try:
+        logger.info(f'予測開始: {datetime.datetime.now()}')
+        logger.info(f'データ点数: {len(sales_data)}')
+        
+        # 予測処理
+        predictions = your_forecast_logic(sales_data)
+        
+        logger.info(f'予測完了: {len(predictions)}期間')
+        return predictions
+        
+    except Exception as e:
+        logger.error(f'予測エラー: {str(e)}')
+        return [0] * 12
+
+sales_data = _arg1
+result = logged_forecast(sales_data)
+return result
+", SUM([Sales]))
+```
+
+---
+
+## 💡 実践Tips
+
+### よく使う予測パターン
+1. **週次売上予測**: `seasonal_periods=52`
+2. **月次売上予測**: `seasonal_periods=12`  
+3. **在庫予測**: ラグ特徴量重視
+4. **需要予測**: 外部要因（天気、イベント）考慮
+
+### パフォーマンス最適化
+- データ量が多い場合は `sampling` で学習データを削減
+- `n_estimators` を調整してモデル複雑度をコントロール
+- `verbose=0` でログ出力を抑制
+
+### トラブルシューティング
+- TabPy接続エラー → ポート確認、ファイアウォール設定
+- ライブラリエラー → 仮想環境でのライブラリ管理
+- メモリエラー → データサイズ削減、モデル軽量化
+
+このガイドでPython+Tableauの強力な予測システムが構築できます！
