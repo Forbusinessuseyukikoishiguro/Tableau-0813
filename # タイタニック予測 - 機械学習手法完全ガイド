@@ -1,0 +1,1185 @@
+# タイタニック予測 - 機械学習手法完全ガイド
+
+## 🎯 この記事で学べること
+
+✅ **10以上の予測手法を実践的に習得**  
+✅ **各手法の特徴・適用場面を理解**  
+✅ **性能比較による最適手法の選択**  
+✅ **実務で使える実装パターンを習得**  
+
+---
+
+## 📊 共通のデータ前処理
+
+まずは、全ての手法で共通して使用するデータ前処理を準備します。
+
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
+
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+
+# データ読み込み
+train_df = pd.read_csv('/kaggle/input/titanic/train.csv')
+test_df = pd.read_csv('/kaggle/input/titanic/test.csv')
+
+def preprocess_data(train_df, test_df):
+    """
+    共通の前処理関数
+    """
+    # 全データ結合
+    all_data = pd.concat([train_df, test_df], ignore_index=True)
+    
+    # 欠損値処理
+    all_data['Age'].fillna(all_data['Age'].median(), inplace=True)
+    all_data['Embarked'].fillna(all_data['Embarked'].mode()[0], inplace=True)
+    all_data['Fare'].fillna(all_data['Fare'].median(), inplace=True)
+    
+    # 特徴量エンジニアリング
+    all_data['FamilySize'] = all_data['SibSp'] + all_data['Parch'] + 1
+    all_data['IsAlone'] = (all_data['FamilySize'] == 1).astype(int)
+    
+    # 敬称抽出
+    all_data['Title'] = all_data['Name'].str.extract(' ([A-Za-z]+)\.', expand=False)
+    title_mapping = {
+        'Mr': 'Mr', 'Miss': 'Miss', 'Mrs': 'Mrs', 'Master': 'Master',
+        'Dr': 'Rare', 'Rev': 'Rare', 'Col': 'Rare', 'Major': 'Rare',
+        'Mlle': 'Miss', 'Countess': 'Rare', 'Ms': 'Miss', 'Lady': 'Rare',
+        'Jonkheer': 'Rare', 'Don': 'Rare', 'Dona': 'Rare', 'Mme': 'Mrs',
+        'Capt': 'Rare', 'Sir': 'Rare'
+    }
+    all_data['Title'] = all_data['Title'].map(title_mapping)
+    all_data['Title'].fillna('Rare', inplace=True)
+    
+    # エンコーディング
+    all_data['Sex'] = all_data['Sex'].map({'female': 1, 'male': 0})
+    
+    # ワンホットエンコーディング
+    embarked_dummies = pd.get_dummies(all_data['Embarked'], prefix='Embarked')
+    title_dummies = pd.get_dummies(all_data['Title'], prefix='Title')
+    all_data = pd.concat([all_data, embarked_dummies, title_dummies], axis=1)
+    
+    # 不要列削除
+    drop_columns = ['Name', 'Ticket', 'Cabin', 'Embarked', 'Title']
+    all_data = all_data.drop(drop_columns, axis=1)
+    
+    # データ分割
+    train_processed = all_data[:len(train_df)]
+    test_processed = all_data[len(train_df):]
+    
+    X_train = train_processed.drop(['PassengerId', 'Survived'], axis=1)
+    y_train = train_processed['Survived']
+    X_test = test_processed.drop(['PassengerId', 'Survived'], axis=1)
+    
+    return X_train, y_train, X_test
+
+# 前処理実行
+X_train, y_train, X_test = preprocess_data(train_df, test_df)
+print(f"特徴量数: {X_train.shape[1]}, 訓練データ数: {X_train.shape[0]}")
+```
+
+---
+
+## 🎯 1. 基本的な機械学習手法
+
+### 1.1 ロジスティック回帰（Logistic Regression）
+
+**特徴：**
+- 線形分類器の代表格
+- 解釈しやすく、高速
+- ベースライン手法として最適
+
+```python
+from sklearn.linear_model import LogisticRegression
+
+def logistic_regression_prediction():
+    """
+    ロジスティック回帰による予測
+    """
+    print("🎯 ロジスティック回帰")
+    
+    # モデル作成
+    model = LogisticRegression(
+        C=1.0,              # 正則化の強さ（小さいほど強い正則化）
+        max_iter=1000,      # 最大反復回数
+        random_state=42
+    )
+    
+    # 特徴量のスケーリング（線形手法では重要）
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # 学習
+    model.fit(X_train_scaled, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test_scaled)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量の重要度（係数）
+    feature_importance = pd.DataFrame({
+        'feature': X_train.columns,
+        'coefficient': model.coef_[0]
+    }).sort_values('coefficient', key=abs, ascending=False)
+    
+    print("重要な特徴量:")
+    print(feature_importance.head())
+    
+    return predictions, cv_scores.mean()
+
+lr_pred, lr_score = logistic_regression_prediction()
+```
+
+**適用場面：**
+- 高速な予測が必要
+- モデルの解釈性が重要
+- ベースライン構築
+
+### 1.2 決定木（Decision Tree）
+
+**特徴：**
+- ルールベースで直感的
+- 特徴量の前処理が不要
+- 過学習しやすい
+
+```python
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import plot_tree
+
+def decision_tree_prediction():
+    """
+    決定木による予測
+    """
+    print("🌳 決定木")
+    
+    # モデル作成
+    model = DecisionTreeClassifier(
+        max_depth=5,           # 最大深度（過学習防止）
+        min_samples_split=20,  # 分岐に必要な最小サンプル数
+        min_samples_leaf=10,   # 葉ノードの最小サンプル数
+        random_state=42
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量重要度
+    feature_importance = pd.DataFrame({
+        'feature': X_train.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    print("重要な特徴量:")
+    print(feature_importance.head())
+    
+    # 決定木の可視化（小さい木の場合）
+    plt.figure(figsize=(20, 10))
+    plot_tree(model, feature_names=X_train.columns, class_names=['Died', 'Survived'], 
+              filled=True, max_depth=3)
+    plt.title('決定木の構造')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+dt_pred, dt_score = decision_tree_prediction()
+```
+
+**適用場面：**
+- モデルの解釈が最重要
+- カテゴリカル変数が多い
+- ルールベースの説明が必要
+
+### 1.3 ランダムフォレスト（Random Forest）
+
+**特徴：**
+- 決定木のアンサンブル
+- 過学習に強い
+- 特徴量重要度が取得可能
+
+```python
+from sklearn.ensemble import RandomForestClassifier
+
+def random_forest_prediction():
+    """
+    ランダムフォレストによる予測
+    """
+    print("🌲 ランダムフォレスト")
+    
+    # モデル作成
+    model = RandomForestClassifier(
+        n_estimators=200,      # 決定木の数
+        max_depth=8,           # 各木の最大深度
+        min_samples_split=5,   # 分岐に必要な最小サンプル数
+        min_samples_leaf=2,    # 葉ノードの最小サンプル数
+        max_features='sqrt',   # 各分岐で考慮する特徴量数
+        random_state=42
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量重要度の可視化
+    feature_importance = pd.DataFrame({
+        'feature': X_train.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=feature_importance.head(10), x='importance', y='feature')
+    plt.title('ランダムフォレスト 特徴量重要度')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+rf_pred, rf_score = random_forest_prediction()
+```
+
+**適用場面：**
+- 安定した性能が欲しい
+- 特徴量重要度の分析
+- 初心者向けの強力な手法
+
+### 1.4 サポートベクターマシン（SVM）
+
+**特徴：**
+- 高次元データに強い
+- カーネルで非線形関係を捉える
+- 計算コストが高い
+
+```python
+from sklearn.svm import SVC
+
+def svm_prediction():
+    """
+    SVMによる予測
+    """
+    print("⚡ サポートベクターマシン")
+    
+    # 特徴量のスケーリング（SVMでは必須）
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # モデル作成
+    model = SVC(
+        C=1.0,                # 正則化パラメータ
+        kernel='rbf',         # カーネル種類（rbf, linear, poly）
+        gamma='scale',        # カーネル係数
+        probability=True,     # 確率出力を有効化
+        random_state=42
+    )
+    
+    # 学習
+    model.fit(X_train_scaled, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test_scaled)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    print(f"サポートベクター数: {model.n_support_}")
+    
+    return predictions, cv_scores.mean()
+
+svm_pred, svm_score = svm_prediction()
+```
+
+**適用場面：**
+- 高次元データ
+- 非線形関係の捉える
+- 小〜中規模データセット
+
+### 1.5 ナイーブベイズ（Naive Bayes）
+
+**特徴：**
+- 確率的分類器
+- 高速で軽量
+- 特徴量の独立性を仮定
+
+```python
+from sklearn.naive_bayes import GaussianNB
+
+def naive_bayes_prediction():
+    """
+    ナイーブベイズによる予測
+    """
+    print("🎲 ナイーブベイズ")
+    
+    # モデル作成
+    model = GaussianNB(
+        var_smoothing=1e-9  # 分散平滑化パラメータ
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    return predictions, cv_scores.mean()
+
+nb_pred, nb_score = naive_bayes_prediction()
+```
+
+---
+
+## 🚀 2. 勾配ブースティング系手法
+
+### 2.1 勾配ブースティング（Gradient Boosting）
+
+**特徴：**
+- 弱学習器を順次改善
+- 高い予測性能
+- パラメータ調整が重要
+
+```python
+from sklearn.ensemble import GradientBoostingClassifier
+
+def gradient_boosting_prediction():
+    """
+    勾配ブースティングによる予測
+    """
+    print("📈 勾配ブースティング")
+    
+    # モデル作成
+    model = GradientBoostingClassifier(
+        n_estimators=200,     # ブースティング段数
+        learning_rate=0.1,    # 学習率
+        max_depth=6,          # 各木の最大深度
+        subsample=0.8,        # サンプリング率
+        random_state=42
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 学習曲線の可視化
+    plt.figure(figsize=(10, 6))
+    plt.plot(model.train_score_, label='Training Score')
+    plt.xlabel('Boosting Iterations')
+    plt.ylabel('Score')
+    plt.title('勾配ブースティング学習曲線')
+    plt.legend()
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+gb_pred, gb_score = gradient_boosting_prediction()
+```
+
+### 2.2 XGBoost
+
+**特徴：**
+- Kaggleで最も人気
+- 高性能・高速
+- 豊富なパラメータ
+
+```python
+import xgboost as xgb
+
+def xgboost_prediction():
+    """
+    XGBoostによる予測
+    """
+    print("🏆 XGBoost")
+    
+    # モデル作成
+    model = xgb.XGBClassifier(
+        n_estimators=200,     # ブースティング回数
+        max_depth=6,          # 木の深さ
+        learning_rate=0.1,    # 学習率
+        subsample=0.8,        # 行サンプリング率
+        colsample_bytree=0.8, # 列サンプリング率
+        random_state=42,
+        eval_metric='logloss' # 評価指標
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量重要度
+    xgb.plot_importance(model, max_num_features=10, importance_type='weight')
+    plt.title('XGBoost 特徴量重要度')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+xgb_pred, xgb_score = xgboost_prediction()
+```
+
+### 2.3 LightGBM
+
+**特徴：**
+- Microsoft開発
+- 高速・軽量
+- カテゴリカル変数を直接処理
+
+```python
+import lightgbm as lgb
+
+def lightgbm_prediction():
+    """
+    LightGBMによる予測
+    """
+    print("💫 LightGBM")
+    
+    # モデル作成
+    model = lgb.LGBMClassifier(
+        n_estimators=200,     # ブースティング回数
+        max_depth=6,          # 木の深さ
+        learning_rate=0.1,    # 学習率
+        subsample=0.8,        # 行サンプリング率
+        colsample_bytree=0.8, # 列サンプリング率
+        random_state=42,
+        verbose=-1            # ログ出力を抑制
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量重要度
+    lgb.plot_importance(model, max_num_features=10, importance_type='split')
+    plt.title('LightGBM 特徴量重要度')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+lgb_pred, lgb_score = lightgbm_prediction()
+```
+
+### 2.4 CatBoost
+
+**特徴：**
+- Yandex開発
+- カテゴリカル変数に特化
+- 前処理が少なく済む
+
+```python
+from catboost import CatBoostClassifier
+
+def catboost_prediction():
+    """
+    CatBoostによる予測
+    """
+    print("🐱 CatBoost")
+    
+    # モデル作成
+    model = CatBoostClassifier(
+        iterations=200,       # ブースティング回数
+        depth=6,              # 木の深さ
+        learning_rate=0.1,    # 学習率
+        random_seed=42,
+        verbose=False         # ログ出力を抑制
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 特徴量重要度
+    feature_importance = pd.DataFrame({
+        'feature': X_train.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    plt.figure(figsize=(10, 6))
+    sns.barplot(data=feature_importance.head(10), x='importance', y='feature')
+    plt.title('CatBoost 特徴量重要度')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+cb_pred, cb_score = catboost_prediction()
+```
+
+---
+
+## 🎭 3. アンサンブル手法
+
+### 3.1 投票分類器（Voting Classifier）
+
+**特徴：**
+- 複数モデルの多数決
+- Hard/Soft投票の選択可能
+- 実装が簡単
+
+```python
+from sklearn.ensemble import VotingClassifier
+
+def voting_classifier_prediction():
+    """
+    投票分類器による予測
+    """
+    print("🗳️ 投票分類器")
+    
+    # ベースモデルの準備
+    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+    xgb_model = xgb.XGBClassifier(n_estimators=100, random_state=42, eval_metric='logloss')
+    lgb_model = lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)
+    
+    # 投票分類器作成
+    model = VotingClassifier(
+        estimators=[
+            ('rf', rf_model),
+            ('xgb', xgb_model), 
+            ('lgb', lgb_model)
+        ],
+        voting='soft'  # 確率ベースの投票（'hard'は多数決）
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 各モデルの性能確認
+    for name, estimator in model.named_estimators_.items():
+        individual_scores = cross_val_score(estimator, X_train, y_train, cv=5)
+        print(f"{name} CV Score: {individual_scores.mean():.4f}")
+    
+    return predictions, cv_scores.mean()
+
+voting_pred, voting_score = voting_classifier_prediction()
+```
+
+### 3.2 スタッキング（Stacking）
+
+**特徴：**
+- メタモデルによる予測統合
+- Out-of-Fold予測を使用
+- 高い予測性能
+
+```python
+from sklearn.ensemble import StackingClassifier
+from sklearn.linear_model import LogisticRegression
+
+def stacking_prediction():
+    """
+    スタッキングによる予測
+    """
+    print("🏗️ スタッキング")
+    
+    # ベースモデル（レベル1）
+    base_models = [
+        ('rf', RandomForestClassifier(n_estimators=100, random_state=42)),
+        ('xgb', xgb.XGBClassifier(n_estimators=100, random_state=42, eval_metric='logloss')),
+        ('lgb', lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)),
+        ('svm', SVC(probability=True, random_state=42))
+    ]
+    
+    # メタモデル（レベル2）
+    meta_model = LogisticRegression(random_state=42)
+    
+    # スタッキング分類器作成
+    model = StackingClassifier(
+        estimators=base_models,
+        final_estimator=meta_model,
+        cv=5,  # Out-of-Fold予測用の分割数
+        stack_method='predict_proba'  # 確率を使用
+    )
+    
+    # 学習
+    model.fit(X_train, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    return predictions, cv_scores.mean()
+
+stacking_pred, stacking_score = stacking_prediction()
+```
+
+### 3.3 ブレンディング（Blending）
+
+**特徴：**
+- Hold-outセットでの重み学習
+- シンプルな実装
+- 計算コストが低い
+
+```python
+from sklearn.model_selection import train_test_split
+
+def blending_prediction():
+    """
+    ブレンディングによる予測
+    """
+    print("🎨 ブレンディング")
+    
+    # Hold-outセットの作成
+    X_blend, X_holdout, y_blend, y_holdout = train_test_split(
+        X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+    )
+    
+    # ベースモデルの学習
+    models = {
+        'rf': RandomForestClassifier(n_estimators=100, random_state=42),
+        'xgb': xgb.XGBClassifier(n_estimators=100, random_state=42, eval_metric='logloss'),
+        'lgb': lgb.LGBMClassifier(n_estimators=100, random_state=42, verbose=-1)
+    }
+    
+    # ベースモデルでHold-outセットの予測
+    holdout_predictions = {}
+    test_predictions = {}
+    
+    for name, model in models.items():
+        # 学習
+        model.fit(X_blend, y_blend)
+        
+        # Hold-outセットで予測
+        holdout_pred = model.predict_proba(X_holdout)[:, 1]
+        holdout_predictions[name] = holdout_pred
+        
+        # テストセットで予測
+        test_pred = model.predict_proba(X_test)[:, 1]
+        test_predictions[name] = test_pred
+    
+    # ブレンディング重みの学習
+    blend_X = np.column_stack([holdout_predictions[name] for name in models.keys()])
+    blend_model = LogisticRegression(random_state=42)
+    blend_model.fit(blend_X, y_holdout)
+    
+    # テストセットでの最終予測
+    test_blend_X = np.column_stack([test_predictions[name] for name in models.keys()])
+    final_predictions = blend_model.predict(test_blend_X)
+    
+    # Hold-outセットでの性能評価
+    holdout_score = accuracy_score(y_holdout, blend_model.predict(blend_X))
+    print(f"Hold-out Score: {holdout_score:.4f}")
+    
+    # 重みの確認
+    weights = blend_model.coef_[0]
+    for i, (name, weight) in enumerate(zip(models.keys(), weights)):
+        print(f"{name} weight: {weight:.4f}")
+    
+    return final_predictions, holdout_score
+
+blend_pred, blend_score = blending_prediction()
+```
+
+---
+
+## 🧠 4. 深層学習・ニューラルネットワーク
+
+### 4.1 多層パーセプトロン（MLP）
+
+**特徴：**
+- 非線形関係を捉える
+- 隠れ層で特徴量の自動抽出
+- 過学習に注意が必要
+
+```python
+from sklearn.neural_network import MLPClassifier
+
+def mlp_prediction():
+    """
+    多層パーセプトロンによる予測
+    """
+    print("🧠 多層パーセプトロン")
+    
+    # 特徴量のスケーリング
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # モデル作成
+    model = MLPClassifier(
+        hidden_layer_sizes=(100, 50),  # 隠れ層の構成
+        activation='relu',             # 活性化関数
+        solver='adam',                 # 最適化手法
+        alpha=0.001,                   # L2正則化
+        batch_size='auto',             # バッチサイズ
+        learning_rate='constant',      # 学習率スケジュール
+        learning_rate_init=0.001,      # 初期学習率
+        max_iter=500,                  # 最大反復回数
+        random_state=42
+    )
+    
+    # 学習
+    model.fit(X_train_scaled, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5)
+    
+    # 予測
+    predictions = model.predict(X_test_scaled)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    print(f"学習反復回数: {model.n_iter_}")
+    
+    # 学習曲線
+    plt.figure(figsize=(10, 6))
+    plt.plot(model.loss_curve_)
+    plt.title('MLPの学習曲線')
+    plt.xlabel('Iterations')
+    plt.ylabel('Loss')
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+mlp_pred, mlp_score = mlp_prediction()
+```
+
+### 4.2 TensorFlow/Keras ニューラルネットワーク
+
+**特徴：**
+- より柔軟なネットワーク構築
+- Dropout、Batch Normalizationなど高度な手法
+- GPU加速対応
+
+```python
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+
+def keras_nn_prediction():
+    """
+    Kerasニューラルネットワークによる予測
+    """
+    print("🤖 Keras ニューラルネットワーク")
+    
+    # 特徴量のスケーリング
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # モデル構築
+    model = Sequential([
+        Dense(128, activation='relu', input_shape=(X_train_scaled.shape[1],)),
+        BatchNormalization(),
+        Dropout(0.3),
+        
+        Dense(64, activation='relu'),
+        BatchNormalization(),
+        Dropout(0.3),
+        
+        Dense(32, activation='relu'),
+        Dropout(0.2),
+        
+        Dense(1, activation='sigmoid')  # 二値分類
+    ])
+    
+    # コンパイル
+    model.compile(
+        optimizer=Adam(learning_rate=0.001),
+        loss='binary_crossentropy',
+        metrics=['accuracy']
+    )
+    
+    # コールバック
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        patience=10,
+        restore_best_weights=True
+    )
+    
+    # 学習
+    history = model.fit(
+        X_train_scaled, y_train,
+        epochs=100,
+        batch_size=32,
+        validation_split=0.2,
+        callbacks=[early_stopping],
+        verbose=0
+    )
+    
+    # 予測
+    predictions_proba = model.predict(X_test_scaled).flatten()
+    predictions = (predictions_proba > 0.5).astype(int)
+    
+    # 学習履歴の可視化
+    plt.figure(figsize=(12, 4))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Loss')
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Accuracy')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 最終的な検証精度
+    val_score = max(history.history['val_accuracy'])
+    print(f"Best Validation Score: {val_score:.4f}")
+    
+    return predictions, val_score
+
+keras_pred, keras_score = keras_nn_prediction()
+```
+
+---
+
+## 🔍 5. 特殊な手法
+
+### 5.1 k近傍法（k-NN）
+
+**特徴：**
+- インスタンスベース学習
+- 局所的なパターンを捉える
+- パラメータ調整が少ない
+
+```python
+from sklearn.neighbors import KNeighborsClassifier
+
+def knn_prediction():
+    """
+    k近傍法による予測
+    """
+    print("👥 k近傍法")
+    
+    # 特徴量のスケーリング
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # 最適なkの探索
+    k_range = range(1, 31)
+    cv_scores_list = []
+    
+    for k in k_range:
+        knn = KNeighborsClassifier(n_neighbors=k, weights='distance')
+        scores = cross_val_score(knn, X_train_scaled, y_train, cv=5)
+        cv_scores_list.append(scores.mean())
+    
+    # 最適なkの決定
+    best_k = k_range[np.argmax(cv_scores_list)]
+    
+    # 最適なkでモデル作成
+    model = KNeighborsClassifier(
+        n_neighbors=best_k,
+        weights='distance',  # 距離による重み付け
+        metric='minkowski',  # 距離指標
+        p=2                  # ユークリッド距離
+    )
+    
+    # 学習
+    model.fit(X_train_scaled, y_train)
+    
+    # 予測
+    predictions = model.predict(X_test_scaled)
+    
+    print(f"Best k: {best_k}")
+    print(f"CV Score: {max(cv_scores_list):.4f}")
+    
+    # kと性能の関係を可視化
+    plt.figure(figsize=(10, 6))
+    plt.plot(k_range, cv_scores_list, marker='o')
+    plt.axvline(x=best_k, color='red', linestyle='--', label=f'Best k={best_k}')
+    plt.xlabel('k (Number of Neighbors)')
+    plt.ylabel('Cross Validation Score')
+    plt.title('k-NN: kと性能の関係')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    
+    return predictions, max(cv_scores_list)
+
+knn_pred, knn_score = knn_prediction()
+```
+
+### 5.2 ガウシアンプロセス
+
+**特徴：**
+- ベイズ的アプローチ
+- 予測の不確実性も取得
+- 小規模データに適している
+
+```python
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+
+def gaussian_process_prediction():
+    """
+    ガウシアンプロセスによる予測
+    """
+    print("🌊 ガウシアンプロセス")
+    
+    # 特徴量のスケーリング
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # カーネルの定義
+    kernel = 1.0 * RBF(1.0)
+    
+    # モデル作成
+    model = GaussianProcessClassifier(
+        kernel=kernel,
+        random_state=42,
+        max_iter_predict=100
+    )
+    
+    # 学習
+    model.fit(X_train_scaled, y_train)
+    
+    # 交差検証
+    cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5)
+    
+    # 予測（確率付き）
+    predictions = model.predict(X_test_scaled)
+    predictions_proba = model.predict_proba(X_test_scaled)
+    
+    print(f"CV Score: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+    
+    # 予測確率の分布
+    plt.figure(figsize=(10, 6))
+    plt.hist(predictions_proba[:, 1], bins=20, alpha=0.7, edgecolor='black')
+    plt.xlabel('Predicted Probability of Survival')
+    plt.ylabel('Frequency')
+    plt.title('ガウシアンプロセス: 予測確率の分布')
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    
+    return predictions, cv_scores.mean()
+
+gp_pred, gp_score = gaussian_process_prediction()
+```
+
+---
+
+## 📊 6. 性能比較とまとめ
+
+### 6.1 全手法の性能比較
+
+```python
+def compare_all_methods():
+    """
+    全ての手法の性能を比較
+    """
+    print("📊 全手法の性能比較")
+    
+    # 結果をまとめる
+    results = {
+        'Logistic Regression': lr_score,
+        'Decision Tree': dt_score,
+        'Random Forest': rf_score,
+        'SVM': svm_score,
+        'Naive Bayes': nb_score,
+        'Gradient Boosting': gb_score,
+        'XGBoost': xgb_score,
+        'LightGBM': lgb_score,
+        'CatBoost': cb_score,
+        'Voting Classifier': voting_score,
+        'Stacking': stacking_score,
+        'Blending': blend_score,
+        'MLP': mlp_score,
+        'Keras NN': keras_score,
+        'k-NN': knn_score,
+        'Gaussian Process': gp_score
+    }
+    
+    # 結果をDataFrameに変換
+    results_df = pd.DataFrame(list(results.items()), columns=['Method', 'CV_Score'])
+    results_df = results_df.sort_values('CV_Score', ascending=False)
+    
+    print(results_df)
+    
+    # 可視化
+    plt.figure(figsize=(15, 8))
+    bars = plt.bar(range(len(results_df)), results_df['CV_Score'], 
+                   color=plt.cm.viridis(np.linspace(0, 1, len(results_df))))
+    
+    plt.xlabel('手法')
+    plt.ylabel('Cross Validation Score')
+    plt.title('タイタニック予測: 全手法の性能比較')
+    plt.xticks(range(len(results_df)), results_df['Method'], rotation=45, ha='right')
+    plt.grid(True, alpha=0.3)
+    
+    # スコアをバーの上に表示
+    for i, (bar, score) in enumerate(zip(bars, results_df['CV_Score'])):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005, 
+                f'{score:.4f}', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return results_df
+
+comparison_results = compare_all_methods()
+```
+
+### 6.2 手法選択のガイドライン
+
+```python
+def method_selection_guide():
+    """
+    手法選択のためのガイドライン
+    """
+    print("🎯 手法選択ガイドライン")
+    
+    guidelines = {
+        '解釈性重視': ['Logistic Regression', 'Decision Tree', 'Naive Bayes'],
+        '高性能重視': ['XGBoost', 'LightGBM', 'Stacking', 'CatBoost'],
+        '高速性重視': ['Logistic Regression', 'Naive Bayes', 'k-NN'],
+        '安定性重視': ['Random Forest', 'Voting Classifier', 'Gradient Boosting'],
+        '小データ': ['Gaussian Process', 'SVM', 'k-NN'],
+        '大データ': ['LightGBM', 'XGBoost', 'Neural Networks'],
+        'カテゴリ変数多い': ['CatBoost', 'Decision Tree', 'Random Forest'],
+        '初心者向け': ['Random Forest', 'Logistic Regression', 'XGBoost'],
+        '上級者向け': ['Stacking', 'Neural Networks', 'Gaussian Process']
+    }
+    
+    for criterion, methods in guidelines.items():
+        print(f"\n{criterion}:")
+        for method in methods:
+            score = comparison_results[comparison_results['Method'] == method]['CV_Score'].values
+            if len(score) > 0:
+                print(f"  - {method}: {score[0]:.4f}")
+    
+    return guidelines
+
+guidelines = method_selection_guide()
+```
+
+### 6.3 実務での推奨アプローチ
+
+```python
+def practical_recommendations():
+    """
+    実務での推奨アプローチ
+    """
+    print("💼 実務での推奨アプローチ")
+    
+    recommendations = """
+    
+    🥇 初期ベースライン（速やかに結果を出す）:
+    1. Logistic Regression: シンプルで解釈しやすい
+    2. Random Forest: 安定した性能、特徴量重要度取得
+    3. XGBoost: 高性能で扱いやすい
+    
+    🥈 性能向上フェーズ（精度を追求）:
+    1. 複数の勾配ブースティング手法を試行
+    2. 特徴量エンジニアリングの強化
+    3. ハイパーパラメータ最適化
+    
+    🥉 最終調整フェーズ（最後の精度向上）:
+    1. Stacking/Blendingによるアンサンブル
+    2. 深層学習の検討
+    3. Cross Validationの精密化
+    
+    📋 選択基準:
+    - 解釈性が重要 → Logistic Regression, Decision Tree
+    - 速度が重要 → Logistic Regression, Naive Bayes
+    - 精度が最重要 → XGBoost, LightGBM, Stacking
+    - 安定性が重要 → Random Forest, Voting
+    - 小データ → Gaussian Process, SVM
+    - 大データ → LightGBM, XGBoost
+    
+    """
+    
+    print(recommendations)
+    
+    return recommendations
+
+practical_guide = practical_recommendations()
+```
+
+---
+
+## 🎉 総括
+
+### 主要な学び
+
+✅ **手法の多様性**: 問題に応じて最適な手法は異なる  
+✅ **アンサンブルの威力**: 複数手法の組み合わせで性能向上  
+✅ **前処理の重要性**: どの手法でも適切な前処理が必要  
+✅ **交差検証の必須性**: 真の性能評価には適切な検証が重要  
+
+### 次のステップ
+
+1. **実際に手を動かす**: 各手法を実装して体感する
+2. **パラメータ調整**: ハイパーパラメータ最適化を学ぶ
+3. **特徴量エンジニアリング**: さらなる性能向上を目指す
+4. **他の競技に挑戦**: 学んだ手法を他のデータセットで試行
+
+### リソース
+
+- **書籍**: 「Kaggleで勝つデータ分析の技術」
+- **オンライン**: Kaggle Learn, Coursera ML Course
+- **実践**: 他のKaggle競技、UCI Machine Learning Repository
+
+**Happy Machine Learning! 🚀📊**
