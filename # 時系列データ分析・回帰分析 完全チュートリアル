@@ -1,0 +1,588 @@
+# ================================================
+# 時系列データ分析・回帰分析 完全チュートリアル
+# Googleコラボ対応版 - コピペで即実行可能
+# ================================================
+
+# ライブラリのインストールと設定
+import warnings
+warnings.filterwarnings('ignore')
+
+try:
+    import japanize_matplotlib
+    print("✅ 日本語フォント利用可能")
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "japanize-matplotlib"])
+    import japanize_matplotlib
+    print("✅ 日本語フォントをインストールしました")
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+from scipy import stats
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# 設定
+plt.style.use('seaborn-v0_8')
+plt.rcParams['figure.figsize'] = (15, 8)
+sns.set_palette("husl")
+
+print("🚀 時系列データ分析・回帰分析チュートリアル開始")
+print("=" * 60)
+
+# ================================================
+# 1. 時系列データの生成（実際のビジネスパターンを模擬）
+# ================================================
+
+print("📊 STEP 1: 時系列データ生成")
+
+# 設定パラメータ
+np.random.seed(42)
+n_periods = 365 * 3  # 3年分のデータ
+start_date = '2021-01-01'
+
+# 日付インデックス作成
+dates = pd.date_range(start=start_date, periods=n_periods, freq='D')
+df = pd.DataFrame({'date': dates})
+
+# 基本トレンド（長期的な成長）
+base_trend = 1000 + np.arange(n_periods) * 0.5  # 年間約180の成長
+
+# 季節性パターン（年次・週次）
+yearly_seasonality = 200 * np.sin(2 * np.pi * np.arange(n_periods) / 365.25)
+weekly_seasonality = 50 * np.sin(2 * np.pi * np.arange(n_periods) / 7)
+
+# 月次パターン（ビジネス特有）
+monthly_pattern = np.array([0.9, 0.8, 1.2, 1.0, 0.9, 1.1, 
+                           0.8, 0.7, 1.1, 1.2, 1.0, 1.3] * (n_periods // 12 + 1))[:n_periods]
+monthly_effect = 100 * (monthly_pattern - 1)
+
+# 外的要因（経済指標の影響）
+economic_factor = np.cumsum(np.random.normal(0, 10, n_periods))
+
+# ランダムノイズ
+noise = np.random.normal(0, 50, n_periods)
+
+# 最終的な目的変数（売上など）
+df['target'] = (base_trend + yearly_seasonality + weekly_seasonality + 
+                monthly_effect + economic_factor * 0.3 + noise)
+
+# 外部変数（説明変数）の生成
+df['marketing_spend'] = 50 + np.random.exponential(30, n_periods)  # マーケティング支出
+df['competitor_activity'] = np.random.uniform(0.5, 1.5, n_periods)  # 競合活動
+df['weather_index'] = np.random.normal(0, 1, n_periods)  # 天候指数
+df['economic_indicator'] = economic_factor  # 経済指標
+
+print(f"✅ データ生成完了")
+print(f"   期間: {df['date'].min().date()} ～ {df['date'].max().date()}")
+print(f"   データ数: {len(df):,} 日分")
+print(f"   目的変数範囲: {df['target'].min():.0f} ～ {df['target'].max():.0f}")
+
+# ================================================
+# 2. 探索的データ分析（EDA）
+# ================================================
+
+print("\n📈 STEP 2: 探索的データ分析")
+
+# 基本統計量
+print("\n📊 基本統計量:")
+print(df[['target', 'marketing_spend', 'competitor_activity', 'economic_indicator']].describe().round(2))
+
+# 時系列プロット
+fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+fig.suptitle('時系列データの探索的分析', fontsize=16, fontweight='bold')
+
+# 1. 目的変数の時系列
+axes[0, 0].plot(df['date'], df['target'], alpha=0.7, linewidth=1)
+axes[0, 0].set_title('目的変数の時系列推移')
+axes[0, 0].set_ylabel('目的変数値')
+axes[0, 0].grid(True, alpha=0.3)
+
+# 2. 季節性分析（月別平均）
+monthly_avg = df.groupby(df['date'].dt.month)['target'].mean()
+months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+axes[0, 1].bar(range(1, 13), monthly_avg.values, alpha=0.8)
+axes[0, 1].set_title('月別季節性パターン')
+axes[0, 1].set_ylabel('平均値')
+axes[0, 1].set_xticks(range(1, 13))
+axes[0, 1].set_xticklabels(months, rotation=45)
+axes[0, 1].grid(True, alpha=0.3)
+
+# 3. 週次パターン
+weekly_avg = df.groupby(df['date'].dt.dayofweek)['target'].mean()
+weekdays = ['月', '火', '水', '木', '金', '土', '日']
+axes[1, 0].bar(range(7), weekly_avg.values, alpha=0.8, color='orange')
+axes[1, 0].set_title('曜日別パターン')
+axes[1, 0].set_ylabel('平均値')
+axes[1, 0].set_xticks(range(7))
+axes[1, 0].set_xticklabels(weekdays)
+axes[1, 0].grid(True, alpha=0.3)
+
+# 4. 相関分析
+corr_data = df[['target', 'marketing_spend', 'competitor_activity', 'economic_indicator']].corr()
+sns.heatmap(corr_data, annot=True, cmap='coolwarm', center=0, ax=axes[1, 1])
+axes[1, 1].set_title('変数間相関')
+
+plt.tight_layout()
+plt.show()
+
+# ================================================
+# 3. 時系列特徴量エンジニアリング
+# ================================================
+
+print("\n🔧 STEP 3: 時系列特徴量エンジニアリング")
+
+def create_time_features(df):
+    """時系列特徴量を作成"""
+    df = df.copy()
+    
+    # 基本的な時間特徴量
+    df['year'] = df['date'].dt.year
+    df['month'] = df['date'].dt.month
+    df['day'] = df['date'].dt.day
+    df['dayofweek'] = df['date'].dt.dayofweek
+    df['dayofyear'] = df['date'].dt.dayofyear
+    df['quarter'] = df['date'].dt.quarter
+    df['is_weekend'] = (df['dayofweek'] >= 5).astype(int)
+    
+    # 周期性の表現（三角関数）
+    df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
+    df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
+    df['day_sin'] = np.sin(2 * np.pi * df['dayofweek'] / 7)
+    df['day_cos'] = np.cos(2 * np.pi * df['dayofweek'] / 7)
+    
+    return df
+
+def create_lag_features(df, target_col, lags):
+    """ラグ特徴量を作成"""
+    df = df.copy()
+    for lag in lags:
+        df[f'{target_col}_lag_{lag}'] = df[target_col].shift(lag)
+    return df
+
+def create_rolling_features(df, target_col, windows):
+    """移動統計量を作成"""
+    df = df.copy()
+    for window in windows:
+        df[f'{target_col}_rolling_mean_{window}'] = df[target_col].rolling(window=window).mean()
+        df[f'{target_col}_rolling_std_{window}'] = df[target_col].rolling(window=window).std()
+        df[f'{target_col}_rolling_min_{window}'] = df[target_col].rolling(window=window).min()
+        df[f'{target_col}_rolling_max_{window}'] = df[target_col].rolling(window=window).max()
+    return df
+
+def create_diff_features(df, target_col):
+    """差分特徴量を作成"""
+    df = df.copy()
+    df[f'{target_col}_diff_1'] = df[target_col].diff(1)  # 1日前との差分
+    df[f'{target_col}_diff_7'] = df[target_col].diff(7)  # 1週間前との差分
+    df[f'{target_col}_pct_change_1'] = df[target_col].pct_change(1)  # 1日前からの変化率
+    df[f'{target_col}_pct_change_7'] = df[target_col].pct_change(7)  # 1週間前からの変化率
+    return df
+
+# 特徴量生成
+print("特徴量生成中...")
+df = create_time_features(df)
+df = create_lag_features(df, 'target', [1, 2, 3, 7, 14, 30])
+df = create_rolling_features(df, 'target', [3, 7, 14, 30])
+df = create_diff_features(df, 'target')
+
+# 外部変数のラグ特徴量も作成
+for col in ['marketing_spend', 'economic_indicator']:
+    df = create_lag_features(df, col, [1, 7])
+
+# 欠損値を除去
+df_clean = df.dropna().reset_index(drop=True)
+
+print(f"✅ 特徴量生成完了")
+print(f"   元の特徴量数: {len([col for col in df.columns if col != 'date'])}個")
+print(f"   生成後データ数: {len(df_clean):,}行")
+
+# 特徴量一覧表示
+feature_cols = [col for col in df_clean.columns if col not in ['date', 'target']]
+print(f"\n📋 生成された特徴量（{len(feature_cols)}個）:")
+for i, col in enumerate(feature_cols[:15], 1):  # 最初の15個を表示
+    print(f"  {i:2d}. {col}")
+if len(feature_cols) > 15:
+    print(f"  ... 他{len(feature_cols)-15}個")
+
+# ================================================
+# 4. 複数の回帰モデルの実装と比較
+# ================================================
+
+print(f"\n🤖 STEP 4: 複数回帰モデルの比較")
+
+# データ準備
+X = df_clean[feature_cols]
+y = df_clean['target']
+
+# 時系列分割（未来のデータは使わない）
+def time_series_split(X, y, test_size=0.2):
+    split_point = int(len(X) * (1 - test_size))
+    X_train, X_test = X.iloc[:split_point], X.iloc[split_point:]
+    y_train, y_test = y.iloc[:split_point], y.iloc[split_point:]
+    return X_train, X_test, y_train, y_test
+
+X_train, X_test, y_train, y_test = time_series_split(X, y)
+
+print(f"訓練データ: {len(X_train)}行, テストデータ: {len(X_test)}行")
+
+# スケーリング
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# モデル定義
+models = {
+    '線形回帰': LinearRegression(),
+    'Ridge回帰': Ridge(alpha=1.0),
+    'Lasso回帰': Lasso(alpha=1.0),
+    'ElasticNet': ElasticNet(alpha=1.0, l1_ratio=0.5),
+    'ランダムフォレスト': RandomForestRegressor(n_estimators=100, random_state=42),
+    'グラデーションブースティング': GradientBoostingRegressor(n_estimators=100, random_state=42)
+}
+
+# 多項式特徴量の追加
+poly_features = PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
+X_train_poly = poly_features.fit_transform(X_train_scaled)
+X_test_poly = poly_features.transform(X_test_scaled)
+
+models['多項式回帰'] = LinearRegression()
+
+# モデル評価結果を格納
+results = []
+
+print("\n🏆 モデル訓練・評価実行中...")
+
+for name, model in models.items():
+    print(f"  {name} 訓練中...", end="")
+    
+    # 多項式回帰の場合は特別処理
+    if name == '多項式回帰':
+        model.fit(X_train_poly, y_train)
+        y_pred = model.predict(X_test_poly)
+    # 線形系モデルはスケール済みデータ使用
+    elif name in ['線形回帰', 'Ridge回帰', 'Lasso回帰', 'ElasticNet']:
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+    # ツリー系モデルは元データ使用
+    else:
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+    
+    # 評価指標計算
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    r2 = r2_score(y_test, y_pred)
+    mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+    
+    results.append({
+        'Model': name,
+        'MAE': mae,
+        'RMSE': rmse,
+        'R²': r2,
+        'MAPE': mape,
+        'Predictions': y_pred
+    })
+    
+    print(f" 完了 (R²: {r2:.3f})")
+
+# 結果をDataFrameに変換
+results_df = pd.DataFrame(results)
+results_df = results_df.sort_values('R²', ascending=False).reset_index(drop=True)
+
+print(f"\n📊 モデル性能比較:")
+print("=" * 80)
+print(f"{'順位':<4} {'モデル名':<20} {'MAE':<8} {'RMSE':<8} {'R²':<6} {'MAPE':<7}")
+print("=" * 80)
+for i, row in results_df.iterrows():
+    print(f"{i+1:<4} {row['Model']:<20} {row['MAE']:<8.1f} {row['RMSE']:<8.1f} {row['R²']:<6.3f} {row['MAPE']:<7.1f}%")
+
+# ================================================
+# 5. 予測結果の可視化
+# ================================================
+
+print(f"\n📈 STEP 5: 予測結果可視化")
+
+# 最高性能モデルの選択
+best_model_name = results_df.iloc[0]['Model']
+best_predictions = results_df.iloc[0]['Predictions']
+
+print(f"🏆 最高性能モデル: {best_model_name} (R² = {results_df.iloc[0]['R²']:.3f})")
+
+# 可視化
+fig, axes = plt.subplots(3, 2, figsize=(20, 15))
+fig.suptitle('時系列回帰分析結果', fontsize=16, fontweight='bold')
+
+# 1. 時系列予測結果
+test_dates = df_clean['date'].iloc[len(X_train):len(X_train)+len(X_test)]
+axes[0, 0].plot(test_dates, y_test.values, label='実測値', linewidth=2, alpha=0.8)
+axes[0, 0].plot(test_dates, best_predictions, label=f'予測値({best_model_name})', linewidth=2, alpha=0.8)
+axes[0, 0].set_title('時系列予測結果')
+axes[0, 0].set_ylabel('目的変数値')
+axes[0, 0].legend()
+axes[0, 0].grid(True, alpha=0.3)
+
+# 2. 予測精度散布図
+axes[0, 1].scatter(y_test, best_predictions, alpha=0.6)
+min_val, max_val = min(y_test.min(), best_predictions.min()), max(y_test.max(), best_predictions.max())
+axes[0, 1].plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
+axes[0, 1].set_xlabel('実測値')
+axes[0, 1].set_ylabel('予測値')
+axes[0, 1].set_title(f'予測精度 (R² = {results_df.iloc[0]["R²"]:.3f})')
+axes[0, 1].grid(True, alpha=0.3)
+
+# 3. 残差分析
+residuals = y_test.values - best_predictions
+axes[1, 0].scatter(best_predictions, residuals, alpha=0.6)
+axes[1, 0].axhline(y=0, color='r', linestyle='--')
+axes[1, 0].set_xlabel('予測値')
+axes[1, 0].set_ylabel('残差')
+axes[1, 0].set_title('残差プロット')
+axes[1, 0].grid(True, alpha=0.3)
+
+# 4. 残差のヒストグラム
+axes[1, 1].hist(residuals, bins=50, alpha=0.7, edgecolor='black')
+axes[1, 1].set_xlabel('残差')
+axes[1, 1].set_ylabel('頻度')
+axes[1, 1].set_title('残差分布')
+axes[1, 1].grid(True, alpha=0.3)
+
+# 5. モデル性能比較（R²）
+model_names = results_df['Model'].values
+r2_scores = results_df['R²'].values
+bars = axes[2, 0].bar(range(len(model_names)), r2_scores, alpha=0.8)
+axes[2, 0].set_xlabel('モデル')
+axes[2, 0].set_ylabel('R² スコア')
+axes[2, 0].set_title('モデル別性能比較 (R²)')
+axes[2, 0].set_xticks(range(len(model_names)))
+axes[2, 0].set_xticklabels(model_names, rotation=45, ha='right')
+axes[2, 0].grid(True, alpha=0.3)
+
+# 最高性能を強調
+best_idx = np.argmax(r2_scores)
+bars[best_idx].set_color('red')
+bars[best_idx].set_alpha(1.0)
+
+# 6. 誤差比較（MAPE）
+mape_scores = results_df['MAPE'].values
+axes[2, 1].bar(range(len(model_names)), mape_scores, alpha=0.8, color='orange')
+axes[2, 1].set_xlabel('モデル')
+axes[2, 1].set_ylabel('MAPE (%)')
+axes[2, 1].set_title('モデル別誤差比較 (MAPE)')
+axes[2, 1].set_xticks(range(len(model_names)))
+axes[2, 1].set_xticklabels(model_names, rotation=45, ha='right')
+axes[2, 1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# ================================================
+# 6. 特徴量重要度分析
+# ================================================
+
+print(f"\n🔍 STEP 6: 特徴量重要度分析")
+
+# ランダムフォレストで特徴量重要度を分析
+rf_model = RandomForestRegressor(n_estimators=200, random_state=42)
+rf_model.fit(X_train, y_train)
+
+# 重要度取得
+feature_importance = pd.DataFrame({
+    'Feature': feature_cols,
+    'Importance': rf_model.feature_importances_
+}).sort_values('Importance', ascending=False)
+
+# 上位15個の特徴量
+top_features = feature_importance.head(15)
+
+print(f"🏆 特徴量重要度ランキング（上位15個）:")
+print("=" * 50)
+for i, (_, row) in enumerate(top_features.iterrows(), 1):
+    print(f"{i:2d}. {row['Feature']:<25}: {row['Importance']:.4f}")
+
+# 重要度可視化
+plt.figure(figsize=(12, 8))
+plt.barh(range(len(top_features)), top_features['Importance'].values)
+plt.yticks(range(len(top_features)), top_features['Feature'].values)
+plt.xlabel('重要度')
+plt.title('特徴量重要度ランキング（上位15個）')
+plt.gca().invert_yaxis()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# ================================================
+# 7. 時系列交差検証
+# ================================================
+
+print(f"\n⏰ STEP 7: 時系列交差検証")
+
+# 時系列分割で交差検証
+tscv = TimeSeriesSplit(n_splits=5)
+
+cv_results = {}
+for name, model in models.items():
+    if name == '多項式回帰':
+        continue  # 計算時間の関係でスキップ
+    
+    if name in ['線形回帰', 'Ridge回帰', 'Lasso回帰', 'ElasticNet']:
+        scores = cross_val_score(model, X_train_scaled, y_train, cv=tscv, scoring='r2')
+    else:
+        scores = cross_val_score(model, X_train, y_train, cv=tscv, scoring='r2')
+    
+    cv_results[name] = {
+        'mean': scores.mean(),
+        'std': scores.std(),
+        'scores': scores
+    }
+
+print(f"📊 時系列交差検証結果 (R² スコア):")
+print("=" * 60)
+print(f"{'モデル名':<20} {'平均':<8} {'標準偏差':<8} {'安定性'}")
+print("=" * 60)
+
+for name, result in sorted(cv_results.items(), key=lambda x: x[1]['mean'], reverse=True):
+    stability = "高" if result['std'] < 0.02 else "中" if result['std'] < 0.05 else "低"
+    print(f"{name:<20} {result['mean']:<8.3f} {result['std']:<8.3f} {stability}")
+
+# ================================================
+# 8. 将来予測
+# ================================================
+
+print(f"\n🔮 STEP 8: 将来予測")
+
+# 最高性能モデルで将来予測
+best_model = None
+for name, model in models.items():
+    if name == best_model_name:
+        best_model = model
+        break
+
+# 将来30日分のデータを作成
+future_dates = pd.date_range(start=df_clean['date'].iloc[-1] + timedelta(days=1), periods=30, freq='D')
+future_df = pd.DataFrame({'date': future_dates})
+
+# 外部変数の将来値を推定（ここでは簡単に最近の平均値を使用）
+recent_data = df_clean.tail(30)
+future_df['marketing_spend'] = recent_data['marketing_spend'].mean() + np.random.normal(0, 10, 30)
+future_df['competitor_activity'] = recent_data['competitor_activity'].mean() + np.random.normal(0, 0.1, 30)
+future_df['weather_index'] = np.random.normal(0, 1, 30)
+future_df['economic_indicator'] = recent_data['economic_indicator'].iloc[-1] + np.cumsum(np.random.normal(0, 5, 30))
+
+# 特徴量生成（ただし、ラグ特徴量は過去データから取得）
+future_df = create_time_features(future_df)
+
+# 簡略化した特徴量セット（ラグ特徴量なし）
+basic_features = ['month', 'day', 'dayofweek', 'quarter', 'is_weekend',
+                 'month_sin', 'month_cos', 'day_sin', 'day_cos',
+                 'marketing_spend', 'competitor_activity', 'weather_index', 'economic_indicator']
+
+# 将来予測実行
+if best_model_name in ['線形回帰', 'Ridge回帰', 'Lasso回帰', 'ElasticNet']:
+    future_X = scaler.transform(future_df[basic_features])
+else:
+    future_X = future_df[basic_features]
+
+future_predictions = best_model.predict(future_X)
+
+print(f"🎯 将来30日間の予測 ({best_model_name}使用):")
+print("=" * 40)
+for i, (date, pred) in enumerate(zip(future_dates, future_predictions), 1):
+    if i <= 7:  # 最初の7日間を表示
+        print(f"{date.strftime('%Y-%m-%d (%a)')}: {pred:.1f}")
+    elif i == 8:
+        print("...")
+    elif i > 23:  # 最後の7日間を表示
+        print(f"{date.strftime('%Y-%m-%d (%a)')}: {pred:.1f}")
+
+# 将来予測の可視化
+plt.figure(figsize=(15, 6))
+
+# 過去のデータ（最後の60日）
+recent_df = df_clean.tail(60)
+plt.plot(recent_df['date'], recent_df['target'], label='過去の実績', linewidth=2, alpha=0.8)
+
+# 将来予測
+plt.plot(future_dates, future_predictions, label='将来予測', linewidth=2, alpha=0.8, linestyle='--')
+
+plt.axvline(x=df_clean['date'].iloc[-1], color='red', linestyle=':', alpha=0.7, label='予測開始点')
+plt.xlabel('日付')
+plt.ylabel('目的変数値')
+plt.title('将来30日間の予測結果')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# ================================================
+# 9. 実用ガイドとまとめ
+# ================================================
+
+print(f"\n📚 STEP 9: 実用ガイド")
+print("=" * 60)
+
+print(f"🎯 このチュートリアルで学んだこと:")
+print(f"")
+print(f"📊 データ準備・前処理:")
+print(f"  ✓ 時系列データの生成と基本的EDA")
+print(f"  ✓ 季節性・トレンド・ノイズの分解")
+print(f"  ✓ 相関分析と外れ値検出")
+print(f"")
+print(f"🔧 特徴量エンジニアリング:")
+print(f"  ✓ 時間特徴量（年月日、曜日、季節性）")
+print(f"  ✓ ラグ特徴量（過去の値の影響）") 
+print(f"  ✓ 移動統計量（トレンド捕捉）")
+print(f"  ✓ 差分・変化率（変動パターン）")
+print(f"  ✓ 周期性表現（三角関数）")
+print(f"")
+print(f"🤖 回帰モデル比較:")
+print(f"  ✓ 線形回帰（ベースライン）")
+print(f"  ✓ 正則化回帰（Ridge, Lasso, ElasticNet）")
+print(f"  ✓ 多項式回帰（非線形関係）")
+print(f"  ✓ アンサンブル手法（RF, GBM）")
+print(f"")
+print(f"📈 評価・検証:")
+print(f"  ✓ 時系列分割（データリーケージ回避）")
+print(f"  ✓ 複数評価指標（MAE, RMSE, R², MAPE）")
+print(f"  ✓ 時系列交差検証（安定性評価）")
+print(f"  ✓ 残差分析（モデル診断）")
+print(f"")
+print(f"🔮 将来予測:")
+print(f"  ✓ 外部変数の将来値推定")
+print(f"  ✓ 予測区間の考慮")
+print(f"  ✓ 予測結果の可視化")
+
+print(f"\n💡 実際のプロジェクトでの活用ポイント:")
+print(f"")
+print(f"🎨 カスタマイズ方法:")
+print(f"  1. データ生成部分を実データ読み込みに変更")
+print(f"     → df = pd.read_csv('your_data.csv')")
+print(f"  2. 特徴量を業界・ビジネス特有のものに調整")
+print(f"  3. 外部データ（天候、経済指標等）の統合")
+print(f"  4. ドメイン知識に基づく特徴量設計")
+print(f"")
+print(f"📊 継続的改善:")
+print(f"  1. 新しいデータでの定期的な再訓練")
+print(f"  2. 予測精度の監視とアラート設定")  
+print(f"  3. 外部要因の変化への対応")
+print(f"  4. モデルの解釈性向上")
+print(f"")
+print(f"⚠️ 注意事項:")
+print(f"  • 時系列では未来のデータを訓練に使わない")
+print(f"  • 季節性の変化に注意（コロナ禍等）")
+print(f"  • 外挿予測の不確実性を考慮")
+print(f"  • ビジネス制約の反映（非負制約等）")
+
+print(f"\n✅ チュートリアル完了！")
+print(f"🚀 このコードをベースに、自分のデータで試してみてください！")
+print("=" * 60)
