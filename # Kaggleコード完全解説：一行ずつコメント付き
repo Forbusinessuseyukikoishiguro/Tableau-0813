@@ -1,0 +1,803 @@
+# Kaggleコード完全解説：一行ずつコメント付き
+
+## 1. データ理解関数の詳細解説
+
+### 1.1 basic_data_info関数
+
+```python
+def basic_data_info(df):
+    """基本的なデータ情報を表示"""
+    # データフレームの基本情報セクションの開始
+    print("=== データの基本情報 ===")
+    
+    # データフレームの行数と列数を表示
+    # df.shape は (行数, 列数) のタプルを返す
+    print(f"Shape: {df.shape}")
+    
+    # メモリ使用量を計算して表示
+    # deep=True: 文字列やオブジェクト型の実際のメモリ使用量を計算
+    # sum(): 全列のメモリ使用量の合計を取得
+    # / 1024**2: バイトからメガバイトに変換（1MB = 1024*1024バイト）
+    # :.2f: 小数点以下2桁まで表示
+    print(f"Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+    
+    # データ型のセクション開始
+    print("\n=== データ型 ===")
+    
+    # 各データ型の列数をカウントして表示
+    # df.dtypes: 各列のデータ型を取得
+    # .value_counts(): 各データ型の出現回数をカウント
+    print(df.dtypes.value_counts())
+    
+    # 欠損値のセクション開始
+    print("\n=== 欠損値 ===")
+    
+    # 各列の欠損値数を計算
+    # df.isnull(): 各セルがNaNかどうかのbool値を返す
+    # .sum(): 各列のTrueの数（欠損値数）を合計
+    missing = df.isnull().sum()
+    
+    # 欠損値がある列のみを表示（降順）
+    # missing > 0: 欠損値が1個以上ある列のみを抽出
+    # .sort_values(ascending=False): 欠損値数の多い順にソート
+    print(missing[missing > 0].sort_values(ascending=False))
+    
+    # 数値列の統計情報セクション開始
+    print("\n=== 数値列の統計 ===")
+    
+    # 数値列の基本統計量を表示
+    # describe(): 平均、標準偏差、最小値、25%値、50%値、75%値、最大値を計算
+    print(df.describe())
+    
+    # カテゴリ列のユニーク値数セクション開始
+    print("\n=== カテゴリ列のユニーク数 ===")
+    
+    # オブジェクト型（文字列）の列をループ処理
+    # select_dtypes(include=['object']): オブジェクト型の列のみを選択
+    for col in df.select_dtypes(include=['object']):
+        # 各カテゴリ列のユニーク値数を表示
+        # nunique(): その列のユニーク値の数を取得
+        print(f"{col}: {df[col].nunique()} unique values")
+```
+
+### 1.2 advanced_eda関数の詳細解説
+
+```python
+def advanced_eda(df, target_col):
+    """高度なEDA"""
+    
+    # 1. 相関分析のセクション
+    # figsize=(15, 12): 図のサイズを15×12インチに設定
+    plt.figure(figsize=(15, 12))
+    
+    # 数値列同士の相関係数行列を計算
+    # corr(): ピアソン相関係数を計算（-1〜1の値）
+    correlation_matrix = df.corr()
+    
+    # ヒートマップを作成
+    # annot=True: 各セルに相関係数の値を表示
+    # cmap='coolwarm': カラーマップ（青→白→赤）
+    # center=0: カラーマップの中心を0に設定
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0)
+    
+    # グラフのタイトルを設定
+    plt.title('Correlation Matrix')
+    
+    # グラフを画面に表示
+    plt.show()
+    
+    # 2. ターゲット変数との関係分析
+    # 数値型の列のみを取得
+    # include=[np.number]: int, float型の列を選択
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    
+    # 各数値列をループ処理
+    for col in numeric_cols:
+        # ターゲット列は除外
+        if col != target_col:
+            # 1つの図に2つのサブプロットを作成
+            # figsize=(12, 4): 図のサイズを12×4インチに設定
+            plt.figure(figsize=(12, 4))
+            
+            # 左のサブプロット（散布図）
+            # 1行2列の1番目のサブプロット
+            plt.subplot(1, 2, 1)
+            
+            # 散布図を作成
+            # alpha=0.5: 点の透明度を50%に設定（重なりを見やすく）
+            plt.scatter(df[col], df[target_col], alpha=0.5)
+            
+            # x軸のラベル設定
+            plt.xlabel(col)
+            
+            # y軸のラベル設定
+            plt.ylabel(target_col)
+            
+            # サブプロットのタイトル設定
+            plt.title(f'{col} vs {target_col}')
+            
+            # 右のサブプロット（ヒストグラム）
+            # 1行2列の2番目のサブプロット
+            plt.subplot(1, 2, 2)
+            
+            # ヒストグラムを作成
+            # bins=50: ビンの数を50に設定
+            # alpha=0.7: 透明度を70%に設定
+            df[col].hist(bins=50, alpha=0.7)
+            
+            # x軸のラベル設定
+            plt.xlabel(col)
+            
+            # サブプロットのタイトル設定
+            plt.title(f'Distribution of {col}')
+            
+            # サブプロット間のレイアウトを自動調整
+            plt.tight_layout()
+            
+            # 図を表示
+            plt.show()
+    
+    # 3. 異常値検出
+    # 第1四分位数（25%値）を計算
+    Q1 = df[numeric_cols].quantile(0.25)
+    
+    # 第3四分位数（75%値）を計算
+    Q3 = df[numeric_cols].quantile(0.75)
+    
+    # 四分位範囲（IQR = Q3 - Q1）を計算
+    IQR = Q3 - Q1
+    
+    # 異常値を検出
+    # Q1 - 1.5*IQR より小さい、またはQ3 + 1.5*IQR より大きい値を異常値とする
+    # ((条件1) | (条件2)): OR条件
+    # .sum(): 各列で条件に該当する行数をカウント
+    outliers = ((df[numeric_cols] < (Q1 - 1.5 * IQR)) | 
+                (df[numeric_cols] > (Q3 + 1.5 * IQR))).sum()
+    
+    print("Outliers per column:")
+    
+    # 異常値がある列のみを表示（降順）
+    # outliers > 0: 異常値が1個以上ある列のみ
+    # .sort_values(ascending=False): 異常値数の多い順にソート
+    print(outliers[outliers > 0].sort_values(ascending=False))
+```
+
+## 2. リーク検出関数の詳細解説
+
+```python
+def detect_leakage(train_df, test_df, target_col):
+    """データリークの検出"""
+    
+    # 1. 統計的分布の比較
+    # 訓練データの数値列を取得
+    numeric_cols = train_df.select_dtypes(include=[np.number]).columns
+    
+    # 各数値列をループ処理
+    for col in numeric_cols:
+        # ターゲット列は除外
+        if col != target_col:
+            # コルモゴロフ・スミルノフ検定をインポート
+            # この検定は2つの分布が同じかどうかを判定
+            from scipy.stats import ks_2samp
+            
+            # KS検定を実行
+            # train_df[col].dropna(): 訓練データの該当列から欠損値を除去
+            # test_df[col].dropna(): テストデータの該当列から欠損値を除去
+            # statistic: KS統計量, p_value: p値
+            statistic, p_value = ks_2samp(train_df[col].dropna(), 
+                                         test_df[col].dropna())
+            
+            # p値が0.01未満の場合は分布に有意差があると判定
+            if p_value < 0.01:  # 有意水準1%
+                # 警告メッセージを表示
+                # :.6f: p値を小数点以下6桁まで表示
+                print(f"Warning: {col} may have distribution shift (p={p_value:.6f})")
+    
+    # 2. 特徴量重要度による簡単な予測
+    # trainとtestを区別できる特徴量 = リークの可能性
+    
+    # 訓練データとテストデータを結合
+    # assign(is_train=1): 訓練データに is_train=1 の列を追加
+    # assign(is_train=0): テストデータに is_train=0 の列を追加
+    # pd.concat(): データフレームを縦方向に結合
+    # reset_index(drop=True): インデックスを0から振り直し
+    combined_df = pd.concat([
+        train_df.assign(is_train=1),
+        test_df.assign(is_train=0)
+    ]).reset_index(drop=True)
+    
+    # モデルの特徴量を定義
+    # ターゲット列と is_train 列以外のすべての列を特徴量とする
+    features = [col for col in combined_df.columns 
+                if col not in [target_col, 'is_train']]
+    
+    # 特徴量データを準備
+    # fillna(-999): 欠損値を-999で埋める
+    X = combined_df[features].fillna(-999)
+    
+    # ターゲットデータ（is_train列）を準備
+    y = combined_df['is_train']
+    
+    # LightGBM分類器を初期化
+    # n_estimators=100: 決定木の数を100に設定
+    # random_state=42: 再現性のために乱数シードを固定
+    model = lgb.LGBMClassifier(n_estimators=100, random_state=42)
+    
+    # モデルを訓練
+    # X: 特徴量, y: ターゲット（train=1, test=0）
+    model.fit(X, y)
+    
+    # 予測確率を計算
+    # predict_proba(X): 各クラスの予測確率を返す
+    # [:, 1]: 2列目（is_train=1の確率）のみを取得
+    predictions = model.predict_proba(X)[:, 1]
+    
+    # AUCスコアを計算
+    # AUCが0.5に近いほど良い（train/testが区別できない）
+    # AUCが1.0に近いほど悪い（train/testが簡単に区別できる＝リーク可能性）
+    auc = roc_auc_score(y, predictions)
+    
+    # AUCスコアを表示
+    # :.4f: 小数点以下4桁まで表示
+    print(f"Train/Test AUC: {auc:.4f}")
+    
+    # AUCが0.8より大きい場合はリークの可能性を警告
+    if auc > 0.8:
+        print("Warning: High train/test distinguishability - possible leakage!")
+        
+        # 重要な特徴量を表示
+        # 特徴量重要度のデータフレームを作成
+        importance_df = pd.DataFrame({
+            'feature': features,  # 特徴量名
+            'importance': model.feature_importances_  # LightGBMの特徴量重要度
+        }).sort_values('importance', ascending=False)  # 重要度の高い順にソート
+        
+        print("Top features distinguishing train/test:")
+        
+        # 上位10個の特徴量を表示
+        # これらがtrain/testを区別する主要な特徴量＝リークの原因かもしれない
+        print(importance_df.head(10))
+```
+
+## 3. 特徴量エンジニアリングクラスの詳細解説
+
+```python
+class FeatureEngineering:
+    def __init__(self):
+        # スケーラー（標準化器）を保存する辞書
+        # 訓練データで学習したスケーラーをテストデータにも適用するため
+        self.scalers = {}
+        
+        # エンコーダー（ラベルエンコーダーなど）を保存する辞書
+        # 訓練データで学習したエンコーダーをテストデータにも適用するため
+        self.encoders = {}
+    
+    def numeric_features(self, df, cols):
+        """数値特徴量の生成"""
+        # 元のデータフレームをコピー（元データを変更しないため）
+        new_df = df.copy()
+        
+        # 指定された数値列をループ処理
+        for col in cols:
+            # 基本統計量による特徴量生成
+            
+            # 2乗特徴量: 非線形関係を捉える
+            new_df[f'{col}_squared'] = df[col] ** 2
+            
+            # 平方根特徴量: 分散を小さくし、外れ値の影響を軽減
+            # np.abs(): 負の値の平方根エラーを防ぐ
+            new_df[f'{col}_sqrt'] = np.sqrt(np.abs(df[col]))
+            
+            # 対数特徴量: 歪んだ分布を正規分布に近づける
+            # np.log1p(): log(1+x)を計算、0や負の値でもエラーにならない
+            new_df[f'{col}_log'] = np.log1p(np.abs(df[col]))
+            
+            # ビニング（区間化）: 連続値を離散値に変換
+            # pd.cut(): 値を指定した区間数に分割
+            # bins=10: 10個の区間に分割
+            # labels=False: 区間番号（0,1,2...）を返す
+            new_df[f'{col}_bin_10'] = pd.cut(df[col], bins=10, labels=False)
+            
+            # 5区間でのビニング
+            new_df[f'{col}_bin_5'] = pd.cut(df[col], bins=5, labels=False)
+            
+            # 異常値フラグ: 異常値かどうかを示すバイナリ特徴量
+            # 四分位数を計算
+            Q1, Q3 = df[col].quantile([0.25, 0.75])
+            
+            # 四分位範囲（IQR）を計算
+            IQR = Q3 - Q1
+            
+            # 異常値判定: Q1-1.5*IQR未満 または Q3+1.5*IQR超過
+            # astype(int): True/FalseをE1/0に変換
+            new_df[f'{col}_is_outlier'] = ((df[col] < Q1 - 1.5*IQR) | 
+                                          (df[col] > Q3 + 1.5*IQR)).astype(int)
+        
+        # 新しい特徴量を含むデータフレームを返す
+        return new_df
+    
+    def categorical_features(self, df, cols):
+        """カテゴリ特徴量の処理"""
+        # 元のデータフレームをコピー
+        new_df = df.copy()
+        
+        # 指定されたカテゴリ列をループ処理
+        for col in cols:
+            # 頻度エンコーディング: カテゴリの出現頻度を特徴量にする
+            # value_counts(): 各カテゴリの出現回数をカウント
+            # to_dict(): 辞書形式に変換
+            freq_map = df[col].value_counts().to_dict()
+            
+            # map(): 各値を対応する頻度に変換
+            new_df[f'{col}_freq'] = df[col].map(freq_map)
+            
+            # ラベルエンコーディング: カテゴリを数値に変換
+            # 初回実行時（訓練データ）
+            if col not in self.encoders:
+                # 新しいLabelEncoderを作成
+                self.encoders[col] = LabelEncoder()
+                
+                # 欠損値を'Unknown'で埋めてからエンコーディング
+                # fit_transform(): 学習と変換を同時実行
+                new_df[f'{col}_label'] = self.encoders[col].fit_transform(df[col].fillna('Unknown'))
+            else:
+                # 2回目以降（テストデータなど）
+                # 既に学習済みのエンコーダーを使用
+                # transform(): 変換のみ実行
+                new_df[f'{col}_label'] = self.encoders[col].transform(df[col].fillna('Unknown'))
+            
+            # 高頻度カテゴリの統合: 低頻度カテゴリを'Other'にまとめる
+            # 上位10個のカテゴリを取得
+            top_categories = df[col].value_counts().head(10).index
+            
+            # ラムダ関数: 上位10位に含まれない場合は'Other'に変換
+            new_df[f'{col}_top10'] = df[col].apply(lambda x: x if x in top_categories else 'Other')
+        
+        # 新しい特徴量を含むデータフレームを返す
+        return new_df
+    
+    def interaction_features(self, df, cols):
+        """交互作用特徴量"""
+        # 元のデータフレームをコピー
+        new_df = df.copy()
+        
+        # 数値型の列のみを抽出
+        # dtype in ['int64', 'float64']: 整数型と浮動小数点型のみ
+        numeric_cols = [col for col in cols if df[col].dtype in ['int64', 'float64']]
+        
+        # 数値×数値の組み合わせを生成
+        # 二重ループで全ての組み合わせを作成
+        for i in range(len(numeric_cols)):
+            # j = i+1から開始することで重複を避ける
+            for j in range(i+1, len(numeric_cols)):
+                # 2つの列を取得
+                col1, col2 = numeric_cols[i], numeric_cols[j]
+                
+                # 乗算特徴量: 2つの特徴量の積
+                new_df[f'{col1}_{col2}_mul'] = df[col1] * df[col2]
+                
+                # 除算特徴量: 2つの特徴量の比
+                # + 1e-8: ゼロ除算エラーを防ぐための小さな値
+                new_df[f'{col1}_{col2}_div'] = df[col1] / (df[col2] + 1e-8)
+                
+                # 加算特徴量: 2つの特徴量の和
+                new_df[f'{col1}_{col2}_add'] = df[col1] + df[col2]
+                
+                # 減算特徴量: 2つの特徴量の差
+                new_df[f'{col1}_{col2}_sub'] = df[col1] - df[col2]
+        
+        # 新しい特徴量を含むデータフレームを返す
+        return new_df
+```
+
+## 4. ベースラインモデル構築関数の詳細解説
+
+```python
+def create_baseline_models(X_train, y_train, X_val, y_val, task_type='classification'):
+    """複数のベースラインモデルを構築"""
+    
+    # モデルオブジェクトを保存する辞書
+    models = {}
+    
+    # 各モデルのスコアを保存する辞書
+    scores = {}
+    
+    # 分類タスクの場合
+    if task_type == 'classification':
+        
+        # LightGBM分類器の構築
+        # n_estimators=1000: 決定木の数を1000に設定
+        # random_state=42: 再現性のために乱数シードを固定
+        lgb_model = lgb.LGBMClassifier(n_estimators=1000, random_state=42)
+        
+        # モデルの訓練
+        # eval_set: 検証データを指定（過学習監視用）
+        # callbacks: 学習中の動作を制御
+        #   - early_stopping(100): 100回連続で改善しなければ学習を停止
+        #   - log_evaluation(0): ログ出力を無効化（0は出力なし）
+        lgb_model.fit(X_train, y_train, 
+                     eval_set=[(X_val, y_val)], 
+                     callbacks=[lgb.early_stopping(100), lgb.log_evaluation(0)])
+        
+        # モデルを辞書に保存
+        models['lgb'] = lgb_model
+        
+        # AUCスコアを計算して保存
+        # predict_proba()[:, 1]: クラス1（陽性）の予測確率
+        # roc_auc_score(): ROC曲線下の面積を計算
+        scores['lgb'] = roc_auc_score(y_val, lgb_model.predict_proba(X_val)[:, 1])
+        
+        # XGBoost分類器の構築
+        # n_estimators=1000: 決定木の数を1000に設定
+        # random_state=42: 再現性のために乱数シードを固定
+        xgb_model = xgb.XGBClassifier(n_estimators=1000, random_state=42)
+        
+        # モデルの訓練
+        # eval_set: 検証データを指定
+        # early_stopping_rounds=100: 100回連続で改善しなければ学習を停止
+        # verbose=False: 学習過程のログを出力しない
+        xgb_model.fit(X_train, y_train,
+                     eval_set=[(X_val, y_val)],
+                     early_stopping_rounds=100,
+                     verbose=False)
+        
+        # モデルを辞書に保存
+        models['xgb'] = xgb_model
+        
+        # AUCスコアを計算して保存
+        scores['xgb'] = roc_auc_score(y_val, xgb_model.predict_proba(X_val)[:, 1])
+        
+        # CatBoost分類器の構築
+        # iterations=1000: 決定木の数を1000に設定
+        # random_state=42: 再現性のために乱数シードを固定
+        # verbose=False: 学習過程のログを出力しない
+        cb_model = cb.CatBoostClassifier(iterations=1000, random_state=42, verbose=False)
+        
+        # モデルの訓練
+        # eval_set: 検証データを指定（タプル形式）
+        # early_stopping_rounds=100: 100回連続で改善しなければ学習を停止
+        cb_model.fit(X_train, y_train, eval_set=(X_val, y_val), early_stopping_rounds=100)
+        
+        # モデルを辞書に保存
+        models['catboost'] = cb_model
+        
+        # AUCスコアを計算して保存
+        scores['catboost'] = roc_auc_score(y_val, cb_model.predict_proba(X_val)[:, 1])
+        
+    else:  # 回帰タスクの場合
+        # 回帰モデルの実装（コメントでは省略）
+        pass
+    
+    # 結果表示
+    # 各モデルの性能を表示
+    for model_name, score in scores.items():
+        # :.4f: 小数点以下4桁まで表示
+        print(f"{model_name}: {score:.4f}")
+    
+    # モデルとスコアの辞書を返す
+    return models, scores
+```
+
+## 5. ハイパーパラメータ最適化関数の詳細解説
+
+```python
+def optimize_lgb_params(X_train, y_train, X_val, y_val, task_type='classification'):
+    """OptunaでLightGBMのハイパーパラメータ最適化"""
+    
+    # 目的関数の定義（Optunaが最適化する関数）
+    def objective(trial):
+        # パラメータ辞書の作成
+        params = {
+            # タスクタイプに応じて目的関数を設定
+            'objective': 'binary' if task_type == 'classification' else 'regression',
+            
+            # 評価指標の設定
+            'metric': 'auc' if task_type == 'classification' else 'rmse',
+            
+            # ブースティングタイプ（勾配ブースティング決定木）
+            'boosting_type': 'gbdt',
+            
+            # 葉の数（木の複雑さを制御）
+            # suggest_int(): 整数の範囲から値を提案
+            'num_leaves': trial.suggest_int('num_leaves', 10, 300),
+            
+            # 学習率（小さいほど汎化性能が良いが時間がかかる）
+            # suggest_float(): 浮動小数点の範囲から値を提案
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+            
+            # 特徴量のサンプリング比率（過学習を防ぐ）
+            'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
+            
+            # データのサンプリング比率（過学習を防ぐ）
+            'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
+            
+            # バギングの頻度
+            'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
+            
+            # 葉に必要な最小サンプル数（過学習を防ぐ）
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+            
+            # L1正則化パラメータ（log=Trueで対数スケールから選択）
+            'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
+            
+            # L2正則化パラメータ（log=Trueで対数スケールから選択）
+            'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
+            
+            # ログ出力を無効化
+            'verbosity': -1,
+            
+            # 再現性のために乱数シードを固定
+            'random_state': 42
+        }
+        
+        # 提案されたパラメータでモデルを作成
+        # **params: 辞書をキーワード引数として展開
+        model = lgb.LGBMClassifier(**params, n_estimators=1000)
+        
+        # モデルの訓練
+        model.fit(X_train, y_train, 
+                 eval_set=[(X_val, y_val)],
+                 callbacks=[lgb.early_stopping(100), lgb.log_evaluation(0)])
+        
+        # タスクタイプに応じてスコアを計算
+        if task_type == 'classification':
+            # 予測確率を取得
+            preds = model.predict_proba(X_val)[:, 1]
+            
+            # AUCスコアを計算（最大化したいので正の値）
+            score = roc_auc_score(y_val, preds)
+        else:
+            # 予測値を取得
+            preds = model.predict(X_val)
+            
+            # MSEを計算（最大化のため負の値）
+            # Optunaは最大化を行うため、最小化したい値は負にする
+            score = -mean_squared_error(y_val, preds)
+        
+        # スコアを返す（Optunaがこの値を最大化する）
+        return score
+    
+    # Optunaのスタディ（最適化実験）を作成
+    # direction='maximize': 目的関数の値を最大化
+    study = optuna.create_study(direction='maximize')
+    
+    # 最適化を実行
+    # n_trials=100: 100回の試行を実行
+    study.optimize(objective, n_trials=100)
+    
+    # 最適化結果を表示
+    # best_value: 最良スコア
+    print(f"Best score: {study.best_value:.4f}")
+    
+    # best_params: 最良パラメータ
+    print(f"Best params: {study.best_params}")
+    
+    # 最良のパラメータを返す
+    return study.best_params
+```
+
+## 6. アンサンブルクラスの詳細解説
+
+```python
+class KaggleEnsemble:
+    def __init__(self):
+        # モデルオブジェクトを保存する辞書
+        self.models = {}
+        
+        # 各モデルの重みを保存する辞書
+        self.weights = {}
+    
+    def add_model(self, name, model, weight=1.0):
+        """モデルをアンサンブルに追加"""
+        # モデルを辞書に追加
+        self.models[name] = model
+        
+        # 重みを辞書に追加
+        self.weights[name] = weight
+    
+    def simple_average(self, X):
+        """単純平均アンサンブル"""
+        # 各モデルの予測結果を保存するリスト
+        predictions = []
+        
+        # 登録された全モデルをループ処理
+        for name, model in self.models.items():
+            # 分類モデルの場合（predict_probaメソッドがある）
+            if hasattr(model, 'predict_proba'):
+                # 陽性クラスの予測確率を取得
+                pred = model.predict_proba(X)[:, 1]
+            else:
+                # 回帰モデルの場合
+                # 予測値を直接取得
+                pred = model.predict(X)
+            
+            # 予測結果をリストに追加
+            predictions.append(pred)
+        
+        # 全モデルの予測の平均を返す
+        # axis=0: 行方向（各サンプル）の平均を計算
+        return np.mean(predictions, axis=0)
+    
+    def weighted_average(self, X):
+        """重み付き平均アンサンブル"""
+        # 各モデルの予測結果を保存するリスト
+        predictions = []
+        
+        # 各モデルの重みを保存するリスト
+        weights = []
+        
+        # 登録された全モデルをループ処理
+        for name, model in self.models.items():
+            # 分類モデルの場合
+            if hasattr(model, 'predict_proba'):
+                # 陽性クラスの予測確率を取得
+                pred = model.predict_proba(X)[:, 1]
+            else:
+                # 回帰モデルの場合
+                # 予測値を直接取得
+                pred = model.predict(X)
+            
+            # 予測結果をリストに追加
+            predictions.append(pred)
+            
+            # そのモデルの重みをリストに追加
+            weights.append(self.weights[name])
+        
+        # 重みを正規化（合計が1になるように）
+        # np.array(): リストをNumPy配列に変換
+        # / np.sum(weights): 重みの合計で割ることで正規化
+        weights = np.array(weights) / np.sum(weights)
+        
+        # 重み付き平均を計算して返す
+        # np.average(): 重み付き平均を計算
+        # axis=0: 行方向の平均
+        # weights=weights: 重みを指定
+        return np.average(predictions, axis=0, weights=weights)
+    
+    def stacking_ensemble(self, X_train, y_train, X_val, y_val, X_test):
+        """スタッキングアンサンブル"""
+        
+        # レベル1の予測値を保存する配列を初期化
+        # 訓練データ用：行数×モデル数の配列
+        train_preds = np.zeros((X_train.shape[0], len(self.models)))
+        
+        # 検証データ用：行数×モデル数の配列
+        val_preds = np.zeros((X_val.shape[0], len(self.models)))
+        
+        # テストデータ用：行数×モデル数の配列
+        test_preds = np.zeros((X_test.shape[0], len(self.models)))
+        
+        # 各モデルでレベル1の予測値を生成
+        for i, (name, model) in enumerate(self.models.items()):
+            # 分類モデルの場合
+            if hasattr(model, 'predict_proba'):
+                # 各データセットの陽性クラス確率を取得
+                train_preds[:, i] = model.predict_proba(X_train)[:, 1]
+                val_preds[:, i] = model.predict_proba(X_val)[:, 1]
+                test_preds[:, i] = model.predict_proba(X_test)[:, 1]
+            else:
+                # 回帰モデルの場合
+                # 各データセットの予測値を取得
+                train_preds[:, i] = model.predict(X_train)
+                val_preds[:, i] = model.predict(X_val)
+                test_preds[:, i] = model.predict(X_test)
+        
+        # レベル2モデル（メタモデル）の構築
+        # レベル1の予測値を入力として新しいモデルを訓練
+        meta_model = lgb.LGBMClassifier(n_estimators=100, random_state=42)
+        
+        # メタモデルの訓練
+        # X: レベル1の予測値（train_preds）
+        # y: 実際のターゲット値
+        meta_model.fit(train_preds, y_train)
+        
+        # 最終予測
+        # テストデータのレベル1予測値をメタモデルに入力
+        # 陽性クラスの予測確率を取得
+        final_preds = meta_model.predict_proba(test_preds)[:, 1]
+        
+        # 最終的な予測結果を返す
+        return final_preds
+```
+
+## 7. 時系列特徴量生成関数の詳細解説
+
+```python
+def create_time_series_features(df, date_col, value_col, id_col=None):
+    """時系列特徴量の生成"""
+    
+    # 元のデータフレームをコピー（元データを変更しないため）
+    df = df.copy()
+    
+    # 日付列をdatetime型に変換
+    # pd.to_datetime(): 文字列やその他の形式をdatetime型に変換
+    df[date_col] = pd.to_datetime(df[date_col])
+    
+    # データを日付順にソート
+    # id_colが指定されている場合はid別に日付順ソート
+    # id_colがない場合は全体を日付順ソート
+    df = df.sort_values([id_col, date_col] if id_col else [date_col])
+    
+    # 基本的な時間特徴量の生成
+    # 年を抽出
+    df['year'] = df[date_col].dt.year
+    
+    # 月を抽出（1-12）
+    df['month'] = df[date_col].dt.month
+    
+    # 日を抽出（1-31）
+    df['day'] = df[date_col].dt.day
+    
+    # 曜日を抽出（0=月曜日, 6=日曜日）
+    df['dayofweek'] = df[date_col].dt.dayofweek
+    
+    # 四半期を抽出（1-4）
+    df['quarter'] = df[date_col].dt.quarter
+    
+    # 週末フラグを作成
+    # dayofweek >= 5: 土曜日（5）または日曜日（6）
+    # astype(int): True/Falseを1/0に変換
+    df['is_weekend'] = (df[date_col].dt.dayofweek >= 5).astype(int)
+    
+    # ラグ特徴量の生成
+    # 過去の値を現在の行に追加
+    for lag in [1, 2, 3, 7, 14, 30]:
+        # id列が指定されている場合（複数の時系列）
+        if id_col:
+            # グループ別にラグを計算
+            # groupby(id_col): id別にグループ化
+            # shift(lag): lag期間分データをシフト
+            df[f'{value_col}_lag_{lag}'] = df.groupby(id_col)[value_col].shift(lag)
+        else:
+            # 単一の時系列の場合
+            # 全体に対してラグを計算
+            df[f'{value_col}_lag_{lag}'] = df[value_col].shift(lag)
+    
+    # 移動平均の生成
+    # 過去の一定期間の平均値
+    for window in [3, 7, 14, 30]:
+        # id列が指定されている場合
+        if id_col:
+            # グループ別に移動平均を計算
+            df[f'{value_col}_ma_{window}'] = (
+                df.groupby(id_col)[value_col]
+                .rolling(window, min_periods=1)  # min_periods=1: 最小1個のデータがあれば計算
+                .mean()  # 平均を計算
+                .reset_index(0, drop=True)  # インデックスをリセット
+            )
+        else:
+            # 単一の時系列の場合
+            df[f'{value_col}_ma_{window}'] = (
+                df[value_col].rolling(window, min_periods=1).mean()
+            )
+    
+    # 差分特徴量の生成
+    # 前の期間との差
+    if id_col:
+        # グループ別に差分を計算
+        # diff(): 1期間前との差分を計算
+        df[f'{value_col}_diff'] = df.groupby(id_col)[value_col].diff()
+    else:
+        # 単一の時系列の場合
+        df[f'{value_col}_diff'] = df[value_col].diff()
+    
+    # 変化率の生成
+    # 過去の値からの変化率（％）
+    for lag in [1, 7, 30]:
+        # ラグ特徴量の列名
+        lag_col = f'{value_col}_lag_{lag}'
+        
+        # ラグ特徴量が存在する場合
+        if lag_col in df.columns:
+            # 変化率を計算
+            # (現在値 - 過去値) / 過去値
+            # + 1e-8: ゼロ除算エラーを防ぐための小さな値
+            df[f'{value_col}_pct_change_{lag}'] = (
+                (df[value_col] - df[lag_col]) / (df[lag_col] + 1e-8)
+            )
+    
+    # 特徴量が追加されたデータフレームを返す
+    return df
+```
+
+この詳細解説により、Kaggleコードの各行が何をしているか、なぜそれが必要なのかを深く理解できるようになります。特に初心者の方は、これらのコメントを参考に実際のコンペで活用してみてください。
