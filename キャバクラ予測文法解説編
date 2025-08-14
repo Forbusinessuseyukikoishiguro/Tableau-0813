@@ -1,0 +1,620 @@
+# Python機械学習コード一行ずつ丁寧解説
+
+## 1. ライブラリインポート部分
+
+```python
+# 必要なライブラリをインポート
+import pandas as pd  # データ操作用
+```
+**解説**: `pandas`は表形式データ（CSV、Excel等）を扱うライブラリ。`as pd`で短縮名を付けることで`pd.DataFrame()`のように簡潔に書ける。
+
+```python
+import numpy as np   # 数値計算用
+```
+**解説**: `numpy`は数値計算・配列操作の基盤ライブラリ。機械学習では数学的計算が多いため必須。`np.array()`、`np.random`などを使用。
+
+```python
+import matplotlib.pyplot as plt  # グラフ描画用
+```
+**解説**: `matplotlib`はPythonの標準的なグラフ描画ライブラリ。`pyplot`はMATLAB風の簡単なインターフェース。
+
+```python
+import seaborn as sns           # 統計グラフ用
+```
+**解説**: `seaborn`は`matplotlib`をベースにした統計専用のグラフライブラリ。より美しく、統計的に意味のあるグラフが簡単に作れる。
+
+```python
+from sklearn.ensemble import RandomForestRegressor  # 機械学習モデル
+```
+**解説**: `scikit-learn`からランダムフォレスト回帰モデルをインポート。`from...import`で特定のクラスのみを読み込み。
+
+```python
+from sklearn.model_selection import train_test_split  # データ分割用
+```
+**解説**: 機械学習で重要な「訓練データ」と「テストデータ」の分割を行う関数。過学習を防ぐために必須。
+
+```python
+from sklearn.metrics import mean_absolute_error, r2_score  # 評価指標
+```
+**解説**: モデルの予測精度を測る指標。`mean_absolute_error`は平均誤差、`r2_score`は決定係数（0～1、1に近いほど高精度）。
+
+```python
+from datetime import datetime, timedelta  # 日付操作用
+```
+**解説**: 日付・時刻の操作用。`datetime`で日付オブジェクト作成、`timedelta`で日付の加減算ができる。
+
+```python
+import warnings  # 警告制御用
+warnings.filterwarnings('ignore')  # 警告を非表示にする
+```
+**解説**: Pythonライブラリが出す警告メッセージを非表示にする。開発時は警告を見るべきだが、デモ実行時は画面がすっきりする。
+
+---
+
+## 2. 初期設定部分
+
+```python
+# グラフの日本語フォント設定（Googleコラボ用）
+plt.rcParams['font.family'] = 'DejaVu Sans'  # 基本フォント設定
+```
+**解説**: `matplotlib`のデフォルト設定を変更。`rcParams`は設定辞書。日本語フォントがない環境でも文字化けしないフォントを指定。
+
+```python
+sns.set_style("whitegrid")  # グラフスタイル設定
+```
+**解説**: `seaborn`のグラフスタイルを設定。`whitegrid`は白背景にグリッド線があるスタイル。見やすく、プロフェッショナルな印象。
+
+```python
+print("📊 キャバクラ売り上げ予測システム開始")
+print("=" * 50)
+```
+**解説**: プログラム開始の表示。`"=" * 50`は等号を50個連続で表示する文字列操作。視覚的な区切り線として使用。
+
+---
+
+## 3. データ生成準備
+
+```python
+# サンプルデータ生成（実際の運用では実データを使用）
+np.random.seed(42)  # 再現性のための乱数シード設定
+```
+**解説**: 乱数の「種」を固定。同じseed値なら何度実行しても同じ乱数列が生成される。機械学習では結果の再現性が重要。
+
+```python
+n_samples = 365  # 1年分のデータを生成
+```
+**解説**: サンプル数を定義。365日分（1年間）のデータを生成することを明示。定数として変数に格納することで後で変更しやすい。
+
+```python
+# 基本的な日付データを作成
+start_date = datetime(2023, 1, 1)  # 開始日を設定
+```
+**解説**: `datetime`オブジェクトで2023年1月1日を作成。`datetime(年, 月, 日)`の形式。
+
+```python
+dates = [start_date + timedelta(days=i) for i in range(n_samples)]  # 365日分の日付リスト
+```
+**解説**: リスト内包表記で365日分の日付リストを生成。`timedelta(days=i)`で開始日からi日後の日付を計算。
+
+**詳細解説**:
+```python
+# 上記と同じ処理を普通のfor文で書くと：
+dates = []
+for i in range(365):
+    date = start_date + timedelta(days=i)
+    dates.append(date)
+```
+
+```python
+# 空のデータフレームを初期化
+data = pd.DataFrame()
+```
+**解説**: 空のpandasデータフレームを作成。後でカラムを追加していく。`pd.DataFrame()`は表形式データの基本構造。
+
+---
+
+## 4. 日付関連特徴量の作成
+
+```python
+# 日付関連の特徴量を作成
+data['date'] = dates  # 日付カラム
+```
+**解説**: データフレームに`date`カラムを追加。`data['カラム名'] = 値`でカラムを作成・代入。
+
+```python
+data['year'] = [d.year for d in dates]  # 年
+```
+**解説**: 各日付から年を抽出してリスト作成。`d.year`で年部分のみ取得。2023年のデータなので全て2023。
+
+```python
+data['month'] = [d.month for d in dates]  # 月
+```
+**解説**: 各日付から月を抽出。1～12の整数値。機械学習では季節性を捉える重要な特徴量。
+
+```python
+data['day'] = [d.day for d in dates]  # 日
+```
+**解説**: 各日付から日を抽出。1～31の整数値。給料日判定などで使用。
+
+```python
+data['weekday'] = [d.weekday() for d in dates]  # 曜日（0=月曜、6=日曜）
+```
+**解説**: 曜日を数値化。`weekday()`メソッドは月曜=0、火曜=1...日曜=6を返す。売り上げ予測で最重要の特徴量の一つ。
+
+```python
+data['is_weekend'] = data['weekday'] >= 5  # 週末フラグ（金土日）
+```
+**解説**: 週末判定のバイナリフラグ。`>=5`で金曜(5)以上をTrue、それ以外をFalseにする。実際は土日が6,0なので金土のみ。
+
+---
+
+## 5. 季節性特徴量
+
+```python
+# 季節性を考慮した特徴量
+data['season'] = data['month'].apply(lambda x: 
+    0 if x in [12, 1, 2] else      # 冬
+    1 if x in [3, 4, 5] else       # 春  
+    2 if x in [6, 7, 8] else       # 夏
+    3)                             # 秋
+```
+**解説**: 月を季節に変換。`apply()`で各行に関数を適用。`lambda`は無名関数で、複雑な条件分岐を1行で記述。
+
+**詳細解説**:
+```python
+# 上記のlambda関数を普通の関数で書くと：
+def get_season(month):
+    if month in [12, 1, 2]:
+        return 0  # 冬
+    elif month in [3, 4, 5]:
+        return 1  # 春
+    elif month in [6, 7, 8]:
+        return 2  # 夏
+    else:
+        return 3  # 秋
+```
+
+---
+
+## 6. ビジネス特徴量
+
+```python
+# 特別な日（給料日、ボーナス時期）のフラグ
+data['is_payday'] = data['day'].apply(lambda x: 1 if x in [25, 26, 27] else 0)  # 給料日付近
+```
+**解説**: 給料日判定フラグ。25～27日を給料日付近として1、それ以外を0にする。多くの会社が月末に給料を支払うため。
+
+```python
+data['is_bonus_month'] = data['month'].apply(lambda x: 1 if x in [6, 12] else 0)  # ボーナス月
+```
+**解説**: ボーナス月判定フラグ。6月（夏のボーナス）と12月（冬のボーナス）を1、それ以外を0にする。
+
+---
+
+## 7. 外的環境要因
+
+```python
+# 天気の影響（ランダムだが現実的な分布）
+weather_types = ['晴れ', '曇り', '雨', '雪']  # 天気の種類
+```
+**解説**: 天気の種類をリストで定義。実際の気象データを使えればベストだが、今回はサンプルデータなので仮想的に生成。
+
+```python
+weather_weights = [0.5, 0.3, 0.15, 0.05]    # 各天気の出現確率
+```
+**解説**: 各天気の出現確率。晴れ50%、曇り30%、雨15%、雪5%の現実的な分布。合計が1.0になる。
+
+```python
+data['weather'] = np.random.choice(weather_types, n_samples, p=weather_weights)
+```
+**解説**: `np.random.choice()`で重み付き抽選。`p`パラメータで確率指定。365日分の天気データをランダム生成。
+
+```python
+# 天気を数値化（売り上げへの影響度）
+weather_impact = {'晴れ': 1.0, '曇り': 0.9, '雨': 0.7, '雪': 0.5}
+```
+**解説**: 文字列の天気を数値に変換するための辞書。晴れを基準(1.0)として、悪天候ほど売り上げ影響が大きい。
+
+```python
+data['weather_score'] = data['weather'].map(weather_impact)
+```
+**解説**: `map()`メソッドで辞書を使って値を変換。'晴れ'→1.0、'雨'→0.7のように機械学習で使える数値に変換。
+
+---
+
+## 8. イベント・キャスト情報
+
+```python
+# イベント情報（特別な日）
+special_events = np.random.choice([0, 1], n_samples, p=[0.9, 0.1])  # 10%の確率でイベント
+```
+**解説**: イベント開催の有無をランダム生成。90%の確率で0（通常日）、10%の確率で1（イベント日）。
+
+```python
+data['has_event'] = special_events
+```
+**解説**: 生成したイベントフラグをデータフレームに追加。
+
+```python
+# キャスト人数（営業に影響）
+base_cast = 8  # 基本キャスト数
+```
+**解説**: 基本となるキャスト数を定数として定義。後の計算で基準値として使用。
+
+```python
+data['cast_count'] = np.random.poisson(base_cast, n_samples)  # ポアソン分布で変動
+```
+**解説**: ポアソン分布でキャスト数を生成。平均8人前後で自然な変動をする。ポアソン分布は「稀な出来事の回数」を表す確率分布で、人数などに適している。
+
+---
+
+## 9. 売り上げ計算の準備
+
+```python
+# 目標売り上げを計算（現実的な要因を組み合わせ）
+base_sales = 50000  # 基本売り上げ（円）
+```
+**解説**: ベースとなる売り上げ金額を設定。全ての効果はこの値に対する倍率として適用される。
+
+```python
+# 曜日効果（金土が高い）
+weekday_multiplier = [0.7, 0.7, 0.8, 0.9, 1.3, 1.5, 1.2]  # 月～日の係数
+```
+**解説**: 曜日ごとの売り上げ倍率をリストで定義。インデックス0=月曜、1=火曜...6=日曜。金曜1.3倍、土曜1.5倍と現実的な設定。
+
+```python
+data['weekday_effect'] = data['weekday'].apply(lambda x: weekday_multiplier[x])
+```
+**解説**: 曜日番号（0～6）をインデックスとして倍率リストから値を取得。月曜日の行は0.7、土曜日の行は1.5が入る。
+
+```python
+# 月次効果（12月、3月が高い傾向）
+monthly_multiplier = [0.9, 0.8, 1.2, 1.0, 0.9, 1.1, 1.0, 0.9, 0.9, 1.0, 1.0, 1.3]
+```
+**解説**: 月ごとの売り上げ倍率。12要素で1月～12月に対応。3月（歓送迎会）と12月（忘年会）が高く設定。
+
+```python
+data['monthly_effect'] = data['month'].apply(lambda x: monthly_multiplier[x-1])
+```
+**解説**: 月番号（1～12）からリストインデックス（0～11）に変換して倍率取得。1月なら`monthly_multiplier[0]`。
+
+---
+
+## 10. 複雑な売り上げ計算
+
+```python
+# 売り上げ計算（複数要因の組み合わせ）
+data['sales'] = (
+    base_sales *                                    # 基本売り上げ
+    data['weekday_effect'] *                        # 曜日効果
+    data['monthly_effect'] *                        # 月次効果  
+    data['weather_score'] *                         # 天気効果
+    (1 + data['is_payday'] * 0.2) *                # 給料日効果（+20%）
+    (1 + data['is_bonus_month'] * 0.3) *           # ボーナス月効果（+30%）
+    (1 + data['has_event'] * 0.4) *                # イベント効果（+40%）
+    (data['cast_count'] / base_cast) *             # キャスト数効果
+    np.random.normal(1, 0.1, n_samples)            # ランダムノイズ（±10%）
+)
+```
+
+**各行の詳細解説**:
+
+- `base_sales *`: 基本売り上げ50,000円から開始
+- `data['weekday_effect'] *`: 曜日による倍率を掛ける（例：土曜なら1.5倍）
+- `data['monthly_effect'] *`: 月による倍率を掛ける（例：12月なら1.3倍）
+- `data['weather_score'] *`: 天気による影響（例：雨なら0.7倍）
+- `(1 + data['is_payday'] * 0.2) *`: 給料日なら1.2倍（1 + 1×0.2）、普通の日なら1.0倍（1 + 0×0.2）
+- `(1 + data['is_bonus_month'] * 0.3) *`: ボーナス月なら1.3倍、普通の月なら1.0倍
+- `(1 + data['has_event'] * 0.4) *`: イベント開催日なら1.4倍、通常日なら1.0倍
+- `(data['cast_count'] / base_cast) *`: キャスト数比率（8人が基準なら1.0倍、12人なら1.5倍）
+- `np.random.normal(1, 0.1, n_samples)`: 平均1.0、標準偏差0.1の正規分布ノイズ
+
+```python
+# 売り上げを整数に丸める（現実的にする）
+data['sales'] = data['sales'].round().astype(int)
+```
+**解説**: `round()`で小数点以下を四捨五入、`astype(int)`で整数型に変換。現実の売り上げは円単位なので小数点は不要。
+
+---
+
+## 11. データ概要の表示
+
+```python
+# データの概要を表示
+print("🔍 生成されたデータの概要:")
+```
+**解説**: データの概要表示開始を示すタイトル。絵文字で視覚的に分かりやすく。
+
+```python
+print(f"データ期間: {data['date'].min().strftime('%Y-%m-%d')} ～ {data['date'].max().strftime('%Y-%m-%d')}")
+```
+**解説**: f文字列で変数を埋め込み。`min()`/`max()`で最小・最大日付を取得、`strftime()`で文字列フォーマット指定。
+
+```python
+print(f"総レコード数: {len(data):,} 件")
+```
+**解説**: `len(data)`でデータフレームの行数取得。`:,`で千単位区切りカンマを表示（例：1,000）。
+
+```python
+print(f"平均売り上げ: {data['sales'].mean():,.0f} 円")
+```
+**解説**: `mean()`で平均値計算。`:.0f`で小数点以下0桁の浮動小数点数として表示。
+
+```python
+print(f"売り上げ範囲: {data['sales'].min():,} ～ {data['sales'].max():,} 円")
+```
+**解説**: 売り上げの最小値と最大値を表示。データの分布範囲を把握できる。
+
+```python
+# 基本統計情報を表示
+print("📈 売り上げ統計:")
+print(data['sales'].describe())
+```
+**解説**: `describe()`メソッドで基本統計量（平均、標準偏差、四分位数など）を一括表示。データの分布を理解するのに重要。
+
+---
+
+## 12. 機械学習の準備
+
+```python
+# 機械学習用の特徴量を準備
+feature_columns = [
+    'month', 'weekday', 'season', 'is_weekend', 
+    'is_payday', 'is_bonus_month', 'weather_score', 
+    'has_event', 'cast_count'
+]
+```
+**解説**: 機械学習で使用する特徴量（説明変数）をリストで定義。`date`や`sales`は除外（日付は直接使わず、売り上げは予測対象）。
+
+```python
+# 特徴量（X）と目標変数（y）を分離
+X = data[feature_columns]  # 説明変数
+```
+**解説**: データフレームから特徴量のみを抽出してX（慣例的に大文字）に代入。機械学習の入力データ。
+
+```python
+y = data['sales']          # 目的変数（売り上げ）
+```
+**解説**: 予測したい値（売り上げ）をy（慣例的に小文字）に代入。機械学習の正解ラベル。
+
+```python
+print("🎯 使用する特徴量:")
+for i, col in enumerate(feature_columns, 1):
+    print(f"  {i:2d}. {col}")
+```
+**解説**: `enumerate(start=1)`で1から始まる連番付きループ。`{i:2d}`で右寄せ2桁の整数表示。特徴量一覧を番号付きで表示。
+
+---
+
+## 13. データ分割
+
+```python
+# データを訓練用とテスト用に分割（8:2の比率）
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, shuffle=True
+)
+```
+**解説**: 
+- `test_size=0.2`: 20%をテスト用、80%を訓練用に分割
+- `random_state=42`: 分割結果の再現性確保
+- `shuffle=True`: 分割前にデータをシャッフル
+- 戻り値は訓練用X、テスト用X、訓練用y、テスト用yの4つ
+
+```python
+print(f"📚 データ分割結果:")
+print(f"  訓練データ: {len(X_train):,} 件 ({len(X_train)/len(data)*100:.1f}%)")
+print(f"  テストデータ: {len(X_test):,} 件 ({len(X_test)/len(data)*100:.1f}%)")
+```
+**解説**: 分割結果を件数と割合で表示。`:.1f`で小数点1桁まで表示。データ分割が正しく行われたか確認。
+
+---
+
+## 14. モデル作成・訓練
+
+```python
+# ランダムフォレスト回帰モデルを作成・訓練
+print("🤖 機械学習モデル訓練中...")
+model = RandomForestRegressor(
+    n_estimators=100,    # 決定木の数
+    random_state=42,     # 再現性のため
+    max_depth=10,        # 木の最大深度
+    min_samples_split=5, # 分割に必要な最小サンプル数
+    n_jobs=-1           # 並列処理（全CPU使用）
+)
+```
+**解説**: 
+- `n_estimators=100`: 100本の決定木でアンサンブル
+- `max_depth=10`: 各木の深さを10層に制限（過学習防止）
+- `min_samples_split=5`: ノード分割に最低5サンプル必要
+- `n_jobs=-1`: 全CPUコアを使用して高速化
+
+```python
+# モデルを訓練データで学習
+model.fit(X_train, y_train)
+```
+**解説**: `fit()`メソッドでモデルを訓練。X_train（特徴量）とy_train（正解）を使って学習実行。
+
+```python
+print("✅ モデル訓練完了!")
+```
+**解説**: 訓練完了の通知。処理時間が長い場合があるので進捗表示として重要。
+
+---
+
+## 15. 予測・評価
+
+```python
+# テストデータで予測を実行
+y_pred = model.predict(X_test)
+```
+**解説**: 訓練済みモデルでテストデータの予測実行。`predict()`は特徴量のみ（X_test）を入力として予測値を返す。
+
+```python
+# モデルの性能を評価
+mae = mean_absolute_error(y_test, y_pred)      # 平均絶対誤差
+```
+**解説**: 実際値（y_test）と予測値（y_pred）の差の絶対値の平均。円単位で分かりやすい誤差指標。
+
+```python
+r2 = r2_score(y_test, y_pred)                  # 決定係数
+```
+**解説**: 決定係数（R²）を計算。0～1の値で1に近いほど高精度。モデルがデータの何％を説明できるかを示す。
+
+```python
+print("📊 モデル性能評価:")
+print(f"  平均絶対誤差 (MAE): {mae:,.0f} 円")
+print(f"  決定係数 (R²): {r2:.3f}")
+print(f"  平均誤差率: {mae/y_test.mean()*100:.1f}%")
+```
+**解説**: 
+- MAE: 絶対誤差を円単位で表示
+- R²: 3桁まで表示
+- 誤差率: MAEを平均売り上げで割って百分率で表示（相対的な精度）
+
+---
+
+## 16. 特徴量重要度分析
+
+```python
+# 特徴量の重要度を計算・表示
+feature_importance = pd.DataFrame({
+    'feature': feature_columns,
+    'importance': model.feature_importances_
+}).sort_values('importance', ascending=False)
+```
+**解説**: 
+- `model.feature_importances_`: ランダムフォレストが算出した各特徴量の重要度
+- 辞書形式でDataFrame作成
+- `sort_values(ascending=False)`: 重要度の降順でソート
+
+```python
+print("🔍 特徴量重要度ランキング:")
+for i, (_, row) in enumerate(feature_importance.iterrows(), 1):
+    print(f"  {i:2d}. {row['feature']:15s}: {row['importance']:.3f}")
+```
+**解説**: 
+- `iterrows()`: DataFrameの各行をタプル（インデックス, Series）で返す
+- `_`: 使わないインデックスを無視
+- `{row['feature']:15s}`: 特徴量名を15文字で左詰め表示
+- 重要度ランキングを番号付きで表示
+
+---
+
+## 17. 可視化
+
+```python
+# 可視化用にグラフを作成
+fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+```
+**解説**: 2×2のサブプロット（4つのグラフ）を作成。`figsize=(15, 12)`で図全体のサイズを指定。
+
+```python
+fig.suptitle('キャバクラ売り上げ分析結果', fontsize=16, fontweight='bold')
+```
+**解説**: 図全体のタイトルを設定。`fontsize`で文字サイズ、`fontweight='bold'`で太字指定。
+
+```python
+# 1. 実際vs予測の散布図
+axes[0, 0].scatter(y_test, y_pred, alpha=0.6, color='blue')
+```
+**解説**: 左上のグラフ（[0,0]）に散布図を描画。`alpha=0.6`で透明度設定（点の重なりを見やすく）。
+
+```python
+axes[0, 0].plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+```
+**解説**: 理想的な予測線（y=x）を赤い破線で描画。`lw=2`は線の太さ。この線上に点があれば完璧な予測。
+
+```python
+axes[0, 0].set_xlabel('実際の売上 (円)')
+axes[0, 0].set_ylabel('予測売上 (円)')
+axes[0, 0].set_title(f'予測精度 (R² = {r2:.3f})')
+axes[0, 0].grid(True, alpha=0.3)
+```
+**解説**: x軸ラベル、y軸ラベル、タイトル設定。`grid(True, alpha=0.3)`で薄いグリッド線を表示。
+
+## 18. 追加グラフ
+
+```python
+# 2. 曜日別売り上げ傾向
+weekday_names = ['月', '火', '水', '木', '金', '土', '日']
+weekday_sales = data.groupby('weekday')['sales'].mean()
+```
+**解説**: 曜日名リスト作成、`groupby('weekday')`で曜日ごとに売り上げの平均値を計算。
+
+```python
+axes[0, 1].bar(range(7), weekday_sales.values, color='lightblue', edgecolor='navy')
+```
+**解説**: 右上のグラフに棒グラフ描画。`range(7)`でx軸位置、`edgecolor`で棒の枠線色指定。
+
+```python
+axes[0, 1].set_xticks(range(7))
+axes[0, 1].set_xticklabels(weekday_names)
+```
+**解説**: x軸の目盛り位置と表示ラベルを設定。数字（0-6）の代わりに曜日名を表示。
+
+続いて月別推移と特徴量重要度のグラフも同様に作成...
+
+```python
+# グラフ間のスペースを調整
+plt.tight_layout()
+plt.show()
+```
+**解説**: `tight_layout()`でグラフ間の余白を自動調整。`show()`でグラフを表示。
+
+---
+
+## 19. 将来予測
+
+```python
+# 将来予測のサンプル（明日の売り上げ予測）
+tomorrow = datetime.now() + timedelta(days=1)
+```
+**解説**: 現在日時から1日後（明日）の日付を計算。`datetime.now()`で現在時刻取得。
+
+```python
+tomorrow_features = {
+    'month': tomorrow.month,
+    'weekday': tomorrow.weekday(),
+    # ... 他の特徴量も同様に設定
+}
+```
+**解説**: 明日の特徴量を辞書形式で作成。訓練時と同じ特徴量を用意する必要がある。
+
+```python
+# 予測用データフレームを作成
+tomorrow_df = pd.DataFrame([tomorrow_features])
+```
+**解説**: 辞書をリストに入れてDataFrame化。scikit-learnは単一の辞書でなくDataFrame形式を要求。
+
+```python
+# 売り上げを予測
+predicted_sales = model.predict(tomorrow_df)[0]
+```
+**解説**: 訓練済みモデルで予測実行。`[0]`で配列の最初の要素（1つしかない）を取得。
+
+---
+
+## 20. What-if分析
+
+```python
+# 条件を変えた場合の予測（What-if分析）
+# ベース条件をコピー
+base_condition = tomorrow_features.copy()
+```
+**解説**: 元の条件辞書をコピー。`copy()`で参照でなく値をコピー（元データを保護）。
+
+```python
+# 1. イベント開催時
+event_condition = base_condition.copy()
+event_condition['has_event'] = 1
+event_sales = model.predict(pd.DataFrame([event_condition]))[0]
+event_diff = event_sales - predicted_sales
+```
+**解説**: 
+- イベント開催フラグを1に変更
+- 変更後の条件で予測実行
+- 元の予測との差額を計算（イベント効果を定量化）
+
+同様にキャスト数増加、雨天時の影響も計算...
+
+この形式で、コードの各行が何をしているか、なぜその処理が必要なのかを詳しく解説しました。初心者エンジニアがコードの流れと意図を理解できるように、技術的な詳細と実用的な意味の両方を説明しています。
