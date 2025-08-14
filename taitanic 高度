@@ -1,0 +1,769 @@
+# ========================================
+# タイタニック競技 精度向上のための高度な分析手法
+# Kaggle上位者の手法を含む包括的なアプローチ
+# ========================================
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
+
+# 高度な機械学習ライブラリ
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score, StratifiedKFold, GridSearchCV
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import xgboost as xgb
+import lightgbm as lgb
+from scipy import stats
+import re
+
+# データ読み込み
+train_df = pd.read_csv('/kaggle/input/titanic/train.csv')
+test_df = pd.read_csv('/kaggle/input/titanic/test.csv')
+
+print("🚢 高度なタイタニック分析開始！")
+print(f"訓練データ: {train_df.shape}, テストデータ: {test_df.shape}")
+
+# ========================================
+# 1. 深度のある探索的データ分析（Advanced EDA）
+# ========================================
+
+def advanced_eda(df):
+    """
+    高度な探索的データ分析
+    - 統計的な関係性の発見
+    - 隠れたパターンの抽出
+    - 外れ値の詳細分析
+    """
+    print("\n🔍 === 高度なEDA開始 ===")
+    
+    # 1. 生存率の詳細分析
+    print("\n📊 詳細な生存率分析:")
+    
+    # 複数条件での生存率
+    survival_analysis = df.groupby(['Sex', 'Pclass'])['Survived'].agg(['count', 'mean']).round(3)
+    print("\n性別 × クラス別生存率:")
+    print(survival_analysis)
+    
+    # 年齢グループ別の詳細分析
+    df['AgeGroup'] = pd.cut(df['Age'], bins=[0, 12, 18, 35, 50, 80], 
+                           labels=['Child', 'Teen', 'Young_Adult', 'Middle_Age', 'Senior'])
+    
+    age_survival = df.groupby(['AgeGroup', 'Sex'])['Survived'].mean().unstack()
+    print("\n年齢グループ × 性別の生存率:")
+    print(age_survival.round(3))
+    
+    # 2. 統計的有意性の検定
+    from scipy.stats import chi2_contingency
+    
+    # 性別と生存の関係（カイ二乗検定）
+    contingency_sex = pd.crosstab(df['Sex'], df['Survived'])
+    chi2_sex, p_value_sex = chi2_contingency(contingency_sex)[:2]
+    print(f"\n性別と生存の関係 (p値: {p_value_sex:.2e})")
+    
+    # クラスと生存の関係
+    contingency_class = pd.crosstab(df['Pclass'], df['Survived'])
+    chi2_class, p_value_class = chi2_contingency(contingency_class)[:2]
+    print(f"クラスと生存の関係 (p値: {p_value_class:.2e})")
+    
+    # 3. 相関関係の詳細分析
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    correlation_matrix = df[numeric_cols].corr()
+    
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(correlation_matrix, annot=True, cmap='RdBu_r', center=0,
+                square=True, fmt='.2f')
+    plt.title('特徴量間の相関関係', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+    
+    # 4. 外れ値の検出と分析
+    print("\n🎯 外れ値分析:")
+    
+    # 運賃の外れ値
+    Q1_fare = df['Fare'].quantile(0.25)
+    Q3_fare = df['Fare'].quantile(0.75)
+    IQR_fare = Q3_fare - Q1_fare
+    fare_outliers = df[(df['Fare'] < Q1_fare - 1.5*IQR_fare) | 
+                      (df['Fare'] > Q3_fare + 1.5*IQR_fare)]
+    
+    print(f"運賃の外れ値: {len(fare_outliers)}件")
+    if len(fare_outliers) > 0:
+        print("外れ値の特徴:")
+        print(fare_outliers[['Name', 'Pclass', 'Fare', 'Survived']].head())
+    
+    # 年齢の外れ値
+    age_outliers = df[df['Age'] > df['Age'].quantile(0.95)]
+    print(f"\n高齢者（95%ile以上）の生存率: {age_outliers['Survived'].mean():.3f}")
+    
+    return df
+
+# 高度なEDA実行
+train_df = advanced_eda(train_df)
+
+# ========================================
+# 2. 高度な特徴量エンジニアリング
+# ========================================
+
+def advanced_feature_engineering(train_df, test_df):
+    """
+    Kaggle上位者レベルの特徴量エンジニアリング
+    """
+    print("\n🔧 === 高度な特徴量エンジニアリング ===")
+    
+    # データ結合
+    all_data = pd.concat([train_df, test_df], ignore_index=True)
+    
+    # === 1. 名前からの高度な情報抽出 ===
+    
+    # 敬称の詳細分類
+    all_data['Title'] = all_data['Name'].str.extract(' ([A-Za-z]+)\.', expand=False)
+    
+    # より詳細な敬称マッピング
+    title_mapping = {
+        'Mr': 'Mr',
+        'Miss': 'Miss', 
+        'Mrs': 'Mrs',
+        'Master': 'Master',
+        'Dr': 'Officer',
+        'Rev': 'Officer',
+        'Col': 'Officer',
+        'Major': 'Officer',
+        'Mlle': 'Miss',
+        'Countess': 'Royalty',
+        'Ms': 'Miss',
+        'Lady': 'Royalty',
+        'Jonkheer': 'Royalty',
+        'Don': 'Royalty',
+        'Dona': 'Royalty',
+        'Mme': 'Mrs',
+        'Capt': 'Officer',
+        'Sir': 'Royalty'
+    }
+    all_data['Title'] = all_data['Title'].map(title_mapping)
+    all_data['Title'].fillna('Other', inplace=True)
+    
+    # 姓（苗字）の抽出
+    all_data['Surname'] = all_data['Name'].str.split(',').str[0]
+    
+    # 同じ姓を持つ家族のサイズ
+    surname_counts = all_data['Surname'].value_counts()
+    all_data['SurnameCount'] = all_data['Surname'].map(surname_counts)
+    
+    # === 2. 家族構成の高度な分析 ===
+    
+    # 家族サイズ
+    all_data['FamilySize'] = all_data['SibSp'] + all_data['Parch'] + 1
+    
+    # 家族サイズのカテゴリ化
+    all_data['FamilySizeGroup'] = pd.cut(all_data['FamilySize'], 
+                                        bins=[0, 1, 4, 7, 11], 
+                                        labels=['Solo', 'Small', 'Medium', 'Large'])
+    
+    # 子供かどうか（より精密な定義）
+    all_data['IsChild'] = ((all_data['Age'] < 16) & (all_data['Parch'] > 0)).astype(int)
+    
+    # 母親かどうかの推定
+    all_data['IsMother'] = ((all_data['Sex'] == 'female') & 
+                           (all_data['Parch'] > 0) & 
+                           (all_data['Age'] > 18) & 
+                           (all_data['Title'] != 'Miss')).astype(int)
+    
+    # === 3. チケット情報の活用 ===
+    
+    # チケット番号の数字部分を抽出
+    all_data['TicketNumber'] = all_data['Ticket'].str.extract('(\d+)').astype(float)
+    
+    # チケット接頭辞の抽出
+    all_data['TicketPrefix'] = all_data['Ticket'].str.extract('([A-Za-z]+)')
+    all_data['TicketPrefix'].fillna('None', inplace=True)
+    
+    # 同じチケットを持つ人数（グループチケット）
+    ticket_counts = all_data['Ticket'].value_counts()
+    all_data['TicketGroup'] = all_data['Ticket'].map(ticket_counts)
+    
+    # === 4. 客室情報の活用 ===
+    
+    # デッキ（客室の最初の文字）
+    all_data['Deck'] = all_data['Cabin'].str[0]
+    all_data['Deck'].fillna('Unknown', inplace=True)
+    
+    # 客室番号
+    all_data['CabinNumber'] = all_data['Cabin'].str.extract('(\d+)').astype(float)
+    
+    # 複数客室を持つかどうか
+    all_data['MultipleCabins'] = all_data['Cabin'].str.count(' ').fillna(0)
+    all_data['HasMultipleCabins'] = (all_data['MultipleCabins'] > 0).astype(int)
+    
+    # === 5. 運賃の高度な分析 ===
+    
+    # 一人当たりの運賃
+    all_data['FarePerPerson'] = all_data['Fare'] / all_data['TicketGroup']
+    
+    # クラス別運賃の標準化
+    for pclass in [1, 2, 3]:
+        class_fare_median = all_data[all_data['Pclass'] == pclass]['Fare'].median()
+        all_data.loc[all_data['Pclass'] == pclass, 'FareNormalized'] = (
+            all_data.loc[all_data['Pclass'] == pclass, 'Fare'] / class_fare_median
+        )
+    
+    # === 6. 年齢の高度な処理 ===
+    
+    # 年齢の欠損値を、より精密な方法で補完
+    # 敬称、クラス、家族構成を考慮した補完
+    def fill_age_advanced(row):
+        if pd.isna(row['Age']):
+            # 同じ敬称、クラス、家族サイズのグループの中央値
+            similar_passengers = all_data[
+                (all_data['Title'] == row['Title']) & 
+                (all_data['Pclass'] == row['Pclass']) &
+                (all_data['FamilySize'] == row['FamilySize'])
+            ]['Age']
+            
+            if len(similar_passengers.dropna()) > 0:
+                return similar_passengers.median()
+            else:
+                # より広い条件で補完
+                return all_data[all_data['Title'] == row['Title']]['Age'].median()
+        return row['Age']
+    
+    all_data['Age'] = all_data.apply(fill_age_advanced, axis=1)
+    
+    # 年齢グループの詳細化
+    all_data['AgeGroup'] = pd.cut(all_data['Age'], 
+                                 bins=[0, 5, 12, 18, 25, 35, 50, 65, 100],
+                                 labels=['Baby', 'Child', 'Teen', 'Young', 'Adult', 'Middle', 'Senior', 'Elderly'])
+    
+    # === 7. 乗船港の高度な活用 ===
+    
+    # 乗船港の欠損値補完（クラスと運賃を考慮）
+    all_data['Embarked'].fillna(all_data['Embarked'].mode()[0], inplace=True)
+    
+    # 乗船港別の平均運賃
+    embarked_fare_mean = all_data.groupby('Embarked')['Fare'].mean()
+    all_data['EmbarkedFareDiff'] = all_data.apply(
+        lambda x: x['Fare'] - embarked_fare_mean[x['Embarked']], axis=1
+    )
+    
+    # === 8. 新しい組み合わせ特徴量 ===
+    
+    # 性別とクラスの組み合わせ
+    all_data['Sex_Pclass'] = all_data['Sex'].astype(str) + '_' + all_data['Pclass'].astype(str)
+    
+    # 年齢グループと性別の組み合わせ
+    all_data['Age_Sex'] = all_data['AgeGroup'].astype(str) + '_' + all_data['Sex']
+    
+    # 敬称とクラスの組み合わせ
+    all_data['Title_Pclass'] = all_data['Title'].astype(str) + '_' + all_data['Pclass'].astype(str)
+    
+    # === 9. 統計的特徴量 ===
+    
+    # 各グループ内での相対的位置
+    # 同じクラス内での年齢の相対位置
+    all_data['Age_Pclass_Rank'] = all_data.groupby('Pclass')['Age'].rank(pct=True)
+    
+    # 同じクラス内での運賃の相対位置
+    all_data['Fare_Pclass_Rank'] = all_data.groupby('Pclass')['Fare'].rank(pct=True)
+    
+    print(f"✅ 特徴量エンジニアリング完了！")
+    print(f"📊 元の特徴量数: {train_df.shape[1]}")
+    print(f"📊 新しい特徴量数: {all_data.shape[1]}")
+    
+    return all_data
+
+# 高度な特徴量エンジニアリング実行
+all_data = advanced_feature_engineering(train_df, test_df)
+
+# ========================================
+# 3. 高度なデータ前処理
+# ========================================
+
+def advanced_preprocessing(all_data, train_size):
+    """
+    機械学習向けの高度な前処理
+    """
+    print("\n⚙️ === 高度な前処理 ===")
+    
+    # 残りの欠損値処理
+    all_data['Fare'].fillna(all_data['Fare'].median(), inplace=True)
+    all_data['FarePerPerson'].fillna(all_data['FarePerPerson'].median(), inplace=True)
+    
+    # カテゴリカル変数のエンコーディング
+    categorical_features = ['Sex', 'Embarked', 'Title', 'FamilySizeGroup', 
+                           'AgeGroup', 'Deck', 'TicketPrefix', 'Sex_Pclass', 
+                           'Age_Sex', 'Title_Pclass']
+    
+    # Label Encodingとワンホットエンコーディングの使い分け
+    le_features = ['Sex']  # 順序性があるもの
+    ohe_features = [f for f in categorical_features if f not in le_features]  # 順序性がないもの
+    
+    # Label Encoding
+    from sklearn.preprocessing import LabelEncoder
+    for feature in le_features:
+        if feature in all_data.columns:
+            le = LabelEncoder()
+            all_data[feature] = le.fit_transform(all_data[feature].astype(str))
+    
+    # One-Hot Encoding
+    for feature in ohe_features:
+        if feature in all_data.columns:
+            # カテゴリ数が多すぎる場合は上位のみ
+            value_counts = all_data[feature].value_counts()
+            if len(value_counts) > 10:  # 10カテゴリ以上の場合
+                top_categories = value_counts.head(10).index
+                all_data[feature] = all_data[feature].apply(
+                    lambda x: x if x in top_categories else 'Other'
+                )
+            
+            dummies = pd.get_dummies(all_data[feature], prefix=feature)
+            all_data = pd.concat([all_data, dummies], axis=1)
+    
+    # 不要な列を削除
+    drop_columns = ['PassengerId', 'Name', 'Ticket', 'Cabin', 'Surname'] + ohe_features
+    features_to_drop = [col for col in drop_columns if col in all_data.columns]
+    all_data = all_data.drop(features_to_drop, axis=1)
+    
+    # 訓練・テストデータに分割
+    train_processed = all_data[:train_size]
+    test_processed = all_data[train_size:]
+    
+    # 特徴量とターゲットに分離
+    X_train = train_processed.drop('Survived', axis=1)
+    y_train = train_processed['Survived']
+    X_test = test_processed.drop('Survived', axis=1)
+    
+    print(f"📊 最終特徴量数: {X_train.shape[1]}")
+    print(f"📋 特徴量一覧:")
+    feature_list = X_train.columns.tolist()
+    for i, feature in enumerate(feature_list):
+        if i % 5 == 0:
+            print()
+        print(f"{feature:20s}", end=" ")
+    print("\n")
+    
+    return X_train, y_train, X_test
+
+# 前処理実行
+X_train, y_train, X_test = advanced_preprocessing(all_data, len(train_df))
+
+# ========================================
+# 4. 特徴量選択
+# ========================================
+
+def feature_selection(X_train, y_train):
+    """
+    統計的手法による特徴量選択
+    """
+    print("\n🎯 === 特徴量選択 ===")
+    
+    # 1. 単変量統計検定による選択
+    from sklearn.feature_selection import SelectKBest, f_classif, chi2
+    from sklearn.feature_selection import mutual_info_classif
+    
+    # F値による選択
+    selector_f = SelectKBest(score_func=f_classif, k=30)
+    X_train_f = selector_f.fit_transform(X_train, y_train)
+    selected_features_f = X_train.columns[selector_f.get_support()].tolist()
+    
+    # 相互情報量による選択
+    mi_scores = mutual_info_classif(X_train, y_train)
+    feature_mi = pd.DataFrame({
+        'feature': X_train.columns,
+        'mutual_info': mi_scores
+    }).sort_values('mutual_info', ascending=False)
+    
+    print("🔝 相互情報量による特徴量重要度 TOP 15:")
+    print(feature_mi.head(15))
+    
+    # 2. 相関が高い特徴量の除去
+    correlation_matrix = X_train.corr().abs()
+    high_corr_pairs = []
+    
+    for i in range(len(correlation_matrix.columns)):
+        for j in range(i+1, len(correlation_matrix.columns)):
+            if correlation_matrix.iloc[i, j] > 0.9:
+                high_corr_pairs.append((
+                    correlation_matrix.columns[i], 
+                    correlation_matrix.columns[j],
+                    correlation_matrix.iloc[i, j]
+                ))
+    
+    if high_corr_pairs:
+        print(f"\n⚠️ 高相関ペア（>0.9）: {len(high_corr_pairs)}組")
+        for pair in high_corr_pairs[:5]:  # 上位5組表示
+            print(f"  {pair[0]} - {pair[1]}: {pair[2]:.3f}")
+    
+    return selected_features_f, feature_mi
+
+selected_features, feature_importance_mi = feature_selection(X_train, y_train)
+
+# ========================================
+# 5. 高度なモデル構築
+# ========================================
+
+def advanced_model_building(X_train, y_train):
+    """
+    複数の高性能アルゴリズムの比較と最適化
+    """
+    print("\n🤖 === 高度なモデル構築 ===")
+    
+    # 交差検証の設定
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    # 1. 基本モデルの定義
+    models = {
+        'RandomForest': RandomForestClassifier(
+            n_estimators=200,
+            max_depth=8,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            random_state=42
+        ),
+        'GradientBoosting': GradientBoostingClassifier(
+            n_estimators=150,
+            learning_rate=0.1,
+            max_depth=6,
+            random_state=42
+        ),
+        'XGBoost': xgb.XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42
+        ),
+        'LightGBM': lgb.LGBMClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            verbose=-1
+        ),
+        'LogisticRegression': LogisticRegression(
+            C=1.0,
+            random_state=42,
+            max_iter=1000
+        ),
+        'SVM': SVC(
+            C=1.0,
+            kernel='rbf',
+            probability=True,
+            random_state=42
+        )
+    }
+    
+    # 2. モデル評価
+    model_scores = {}
+    print("\n📊 モデル性能比較:")
+    print("-" * 60)
+    
+    for name, model in models.items():
+        scores = cross_val_score(model, X_train, y_train, cv=skf, scoring='accuracy')
+        model_scores[name] = {
+            'mean': scores.mean(),
+            'std': scores.std(),
+            'scores': scores
+        }
+        print(f"{name:20s}: {scores.mean():.4f} (+/- {scores.std()*2:.4f})")
+    
+    # 3. 最高性能モデルの特定
+    best_model_name = max(model_scores.keys(), key=lambda x: model_scores[x]['mean'])
+    best_model = models[best_model_name]
+    
+    print(f"\n🏆 最高性能モデル: {best_model_name} ({model_scores[best_model_name]['mean']:.4f})")
+    
+    return models, model_scores, best_model_name, best_model
+
+models, model_scores, best_model_name, best_model = advanced_model_building(X_train, y_train)
+
+# ========================================
+# 6. ハイパーパラメータの最適化
+# ========================================
+
+def hyperparameter_optimization(best_model, best_model_name, X_train, y_train):
+    """
+    グリッドサーチによるハイパーパラメータ最適化
+    """
+    print(f"\n🔧 === {best_model_name} のハイパーパラメータ最適化 ===")
+    
+    # モデル別のパラメータグリッド
+    param_grids = {
+        'RandomForest': {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [6, 8, 10],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4]
+        },
+        'XGBoost': {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 6, 9],
+            'learning_rate': [0.05, 0.1, 0.2],
+            'subsample': [0.8, 0.9, 1.0]
+        },
+        'LightGBM': {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 6, 9],
+            'learning_rate': [0.05, 0.1, 0.2],
+            'subsample': [0.8, 0.9, 1.0]
+        },
+        'GradientBoosting': {
+            'n_estimators': [100, 150, 200],
+            'max_depth': [3, 6, 9],
+            'learning_rate': [0.05, 0.1, 0.15]
+        }
+    }
+    
+    if best_model_name in param_grids:
+        param_grid = param_grids[best_model_name]
+        
+        # グリッドサーチ実行
+        grid_search = GridSearchCV(
+            best_model,
+            param_grid,
+            cv=5,
+            scoring='accuracy',
+            n_jobs=-1,
+            verbose=1
+        )
+        
+        grid_search.fit(X_train, y_train)
+        
+        print(f"\n✅ 最適化完了!")
+        print(f"📈 最高スコア: {grid_search.best_score_:.4f}")
+        print(f"🎯 最適パラメータ:")
+        for param, value in grid_search.best_params_.items():
+            print(f"  {param}: {value}")
+        
+        return grid_search.best_estimator_
+    else:
+        print(f"⚠️ {best_model_name} のパラメータグリッドが定義されていません")
+        return best_model
+
+# ハイパーパラメータ最適化実行
+optimized_model = hyperparameter_optimization(best_model, best_model_name, X_train, y_train)
+
+# ========================================
+# 7. アンサンブル手法
+# ========================================
+
+def create_ensemble_model(models, X_train, y_train):
+    """
+    複数モデルを組み合わせたアンサンブル
+    """
+    print("\n🎭 === アンサンブルモデル構築 ===")
+    
+    # 上位3モデルを選択
+    top_models = sorted(model_scores.items(), key=lambda x: x[1]['mean'], reverse=True)[:3]
+    
+    print("🔝 アンサンブル対象モデル:")
+    ensemble_models = []
+    for name, score_info in top_models:
+        print(f"  {name}: {score_info['mean']:.4f}")
+        ensemble_models.append((name, models[name]))
+    
+    # Voting Classifier（多数決）
+    voting_clf = VotingClassifier(
+        estimators=ensemble_models,
+        voting='soft'  # 確率ベースの投票
+    )
+    
+    # アンサンブルの性能評価
+    ensemble_scores = cross_val_score(voting_clf, X_train, y_train, cv=5, scoring='accuracy')
+    
+    print(f"\n📊 アンサンブル性能: {ensemble_scores.mean():.4f} (+/- {ensemble_scores.std()*2:.4f})")
+    print(f"📈 最高単体モデル: {top_models[0][1]['mean']:.4f}")
+    print(f"🎯 改善度: {ensemble_scores.mean() - top_models[0][1]['mean']:.4f}")
+    
+    return voting_clf, ensemble_scores
+
+ensemble_model, ensemble_scores = create_ensemble_model(models, X_train, y_train)
+
+# ========================================
+# 8. 特徴量重要度の詳細分析
+# ========================================
+
+def analyze_feature_importance(model, X_train, feature_names):
+    """
+    モデルの特徴量重要度を詳細分析
+    """
+    print("\n📊 === 特徴量重要度分析 ===")
+    
+    if hasattr(model, 'feature_importances_'):
+        importance_df = pd.DataFrame({
+            'feature': feature_names,
+            'importance': model.feature_importances_
+        }).sort_values('importance', ascending=False)
+        
+        print("🔝 重要特徴量 TOP 20:")
+        print(importance_df.head(20))
+        
+        # 重要度の可視化
+        plt.figure(figsize=(12, 8))
+        top_features = importance_df.head(15)
+        sns.barplot(data=top_features, x='importance', y='feature', palette='viridis')
+        plt.title('特徴量重要度 TOP 15', fontsize=16, fontweight='bold')
+        plt.xlabel('重要度', fontsize=12)
+        plt.tight_layout()
+        plt.show()
+        
+        return importance_df
+    else:
+        print("⚠️ このモデルは特徴量重要度を提供しません")
+        return None
+
+# 最適化モデルで特徴量重要度分析
+feature_importance_df = analyze_feature_importance(optimized_model, X_train, X_train.columns)
+
+# ========================================
+# 9. エラー分析
+# ========================================
+
+def error_analysis(model, X_train, y_train):
+    """
+    予測エラーの詳細分析
+    """
+    print("\n🔍 === エラー分析 ===")
+    
+    # 交差検証での予測
+    from sklearn.model_selection import cross_val_predict
+    y_pred = cross_val_predict(model, X_train, y_train, cv=5)
+    
+    # 混同行列
+    cm = confusion_matrix(y_train, y_pred)
+    
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['死亡', '生存'], yticklabels=['死亡', '生存'])
+    plt.title('混同行列', fontsize=16, fontweight='bold')
+    plt.ylabel('実際の値', fontsize=12)
+    plt.xlabel('予測値', fontsize=12)
+    plt.tight_layout()
+    plt.show()
+    
+    # エラー詳細
+    errors = X_train[y_train != y_pred]
+    error_actual = y_train[y_train != y_pred]
+    error_pred = y_pred[y_train != y_pred]
+    
+    print(f"📊 エラー分析結果:")
+    print(f"  総データ数: {len(y_train)}")
+    print(f"  エラー数: {len(errors)} ({len(errors)/len(y_train)*100:.1f}%)")
+    print(f"  偽陽性（生存予測→実際は死亡）: {sum((y_pred == 1) & (y_train == 0))}")
+    print(f"  偽陰性（死亡予測→実際は生存）: {sum((y_pred == 0) & (y_train == 1))}")
+    
+    # 分類レポート
+    print("\n📋 分類レポート:")
+    print(classification_report(y_train, y_pred, target_names=['死亡', '生存']))
+    
+    return errors, error_actual, error_pred
+
+errors, error_actual, error_pred = error_analysis(optimized_model, X_train, y_train)
+
+# ========================================
+# 10. 最終予測と提出
+# ========================================
+
+def final_prediction_and_submission(model, X_test, test_df):
+    """
+    最終予測の実行と提出ファイル作成
+    """
+    print("\n🎯 === 最終予測・提出ファイル作成 ===")
+    
+    # 最終モデルで学習
+    model.fit(X_train, y_train)
+    
+    # 予測実行
+    predictions = model.predict(X_test)
+    prediction_proba = model.predict_proba(X_test)[:, 1]
+    
+    # 予測結果の分析
+    print(f"📊 予測結果:")
+    print(f"  生存予測: {sum(predictions)} 人 ({sum(predictions)/len(predictions)*100:.1f}%)")
+    print(f"  死亡予測: {len(predictions) - sum(predictions)} 人 ({(len(predictions) - sum(predictions))/len(predictions)*100:.1f}%)")
+    print(f"  平均確信度: {prediction_proba.mean():.3f}")
+    print(f"  確信度範囲: {prediction_proba.min():.3f} - {prediction_proba.max():.3f}")
+    
+    # 確信度の分布
+    plt.figure(figsize=(10, 6))
+    plt.hist(prediction_proba, bins=30, alpha=0.7, color='skyblue', edgecolor='black')
+    plt.axvline(prediction_proba.mean(), color='red', linestyle='--', 
+                label=f'平均: {prediction_proba.mean():.3f}')
+    plt.title('予測確信度の分布', fontsize=16, fontweight='bold')
+    plt.xlabel('生存確率', fontsize=12)
+    plt.ylabel('頻度', fontsize=12)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+    
+    # 提出ファイル作成
+    submission = pd.DataFrame({
+        'PassengerId': test_df['PassengerId'],
+        'Survived': predictions
+    })
+    
+    # 検証
+    assert submission.shape == (418, 2), "提出ファイルの形状が正しくありません"
+    assert submission['Survived'].isin([0, 1]).all(), "予測値は0または1である必要があります"
+    
+    # 保存
+    submission.to_csv('advanced_titanic_submission.csv', index=False)
+    
+    print("\n✅ 提出ファイル作成完了: advanced_titanic_submission.csv")
+    print("\n📈 期待スコア範囲: 0.80 - 0.84")
+    
+    return submission, predictions, prediction_proba
+
+# アンサンブルモデルで最終予測
+submission, final_predictions, final_probabilities = final_prediction_and_submission(
+    ensemble_model, X_test, test_df
+)
+
+# ========================================
+# 11. 改善のための追加アイデア
+# ========================================
+
+print("\n🚀 === さらなる改善アイデア ===")
+
+improvement_ideas = """
+🎯 特徴量エンジニアリングの追加アイデア:
+  • 名前の長さ（社会的地位の推定）
+  • チケット価格の乗船港別偏差
+  • 年齢の敬称別偏差
+  • 家族内の年齢順位
+
+🤖 モデリングの改善:
+  • CatBoost, Neural Networks の追加
+  • Stacking（階層アンサンブル）
+  • Pseudo Labeling（半教師あり学習）
+  • Feature Selection の自動化
+
+📊 外部データの活用:
+  • 歴史的データ（実際の乗客名簿）
+  • 客室の詳細情報
+  • 当時の社会情勢データ
+
+🔧 高度な前処理:
+  • 外れ値の除去・変換
+  • 特徴量の交互作用
+  • PCAによる次元削減
+  • Target Encoding
+
+📈 評価・検証の改善:
+  • Out-of-Fold 予測
+  • Time Series Split（疑似時系列）
+  • Adversarial Validation
+  • Bayesian Optimization
+"""
+
+print(improvement_ideas)
+
+print("\n🎉 高度な分析完了！Kaggleでの上位入賞を目指しましょう！")
