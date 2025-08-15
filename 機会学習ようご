@@ -1,0 +1,443 @@
+# Kaggle機械学習用語集 - 完全版
+
+## 📚 目次
+- [基本概念](#基本概念)
+- [データ関連](#データ関連)
+- [モデル・アルゴリズム](#モデル・アルゴリズム)
+- [評価指標](#評価指標)
+- [前処理・特徴量](#前処理・特徴量)
+- [検証・テスト](#検証・テスト)
+- [アンサンブル](#アンサンブル)
+- [Kaggle特有用語](#kaggle特有用語)
+
+---
+
+## 基本概念
+
+### 目的変数（Target Variable / Dependent Variable）
+**読み方**: もくてきへんすう  
+**英語**: Target Variable, Dependent Variable, Response Variable  
+**意味**: 予測したい値。機械学習で「答え」にあたる変数  
+**例**: 家の価格、病気の有無、顧客の購入確率  
+**Kaggleでの使用例**: 
+```python
+y = train_df['target']  # 目的変数を取得
+y = train_df['SalePrice']  # 家の価格を予測する場合
+```
+
+### 特徴量（Feature / Independent Variable）
+**読み方**: とくちょうりょう  
+**英語**: Feature, Independent Variable, Predictor  
+**意味**: 予測に使用する入力データ。目的変数を予測するための手がかり  
+**例**: 家の広さ、築年数、立地など  
+**Kaggleでの使用例**:
+```python
+X = train_df[['feature1', 'feature2', 'feature3']]  # 特徴量を選択
+X = train_df.drop('target', axis=1)  # 目的変数以外を特徴量として使用
+```
+
+### 訓練データ（Training Data）
+**読み方**: くんれんデータ  
+**英語**: Training Data, Train Set  
+**意味**: モデルの学習に使用するデータ。正解（目的変数）が含まれている  
+**Kaggleでの使用例**:
+```python
+train_df = pd.read_csv('train.csv')  # 訓練データ読み込み
+X_train, y_train = train_df.drop('target', axis=1), train_df['target']
+```
+
+### テストデータ（Test Data）
+**読み方**: テストデータ  
+**英語**: Test Data, Test Set  
+**意味**: 予測対象のデータ。正解は含まれておらず、これに対して予測を行う  
+**Kaggleでの使用例**:
+```python
+test_df = pd.read_csv('test.csv')  # テストデータ読み込み
+predictions = model.predict(test_df)  # 予測実行
+```
+
+---
+
+## データ関連
+
+### 欠損値（Missing Value / NaN）
+**読み方**: けっそんち  
+**英語**: Missing Value, NaN (Not a Number), Null  
+**意味**: データが存在しない箇所。処理が必要  
+**対処法**: 削除、補完、フラグ化  
+**Kaggleでの使用例**:
+```python
+# 欠損値確認
+print(df.isnull().sum())
+# 平均値で補完
+df['age'].fillna(df['age'].mean(), inplace=True)
+```
+
+### 外れ値（Outlier）
+**読み方**: はずれち  
+**英語**: Outlier  
+**意味**: 他のデータから大きく外れた値。モデル性能に悪影響を与えることがある  
+**検出方法**: IQR法、Zスコア、可視化  
+**Kaggleでの使用例**:
+```python
+# IQR法で外れ値検出
+Q1 = df['price'].quantile(0.25)
+Q3 = df['price'].quantile(0.75)
+IQR = Q3 - Q1
+outliers = df[(df['price'] < Q1 - 1.5*IQR) | (df['price'] > Q3 + 1.5*IQR)]
+```
+
+### データリーク（Data Leakage）
+**読み方**: データリーク  
+**英語**: Data Leakage, Leakage  
+**意味**: 本来知ることができない未来の情報が特徴量に含まれること  
+**例**: 未来の株価を使って今日の株価を予測  
+**注意点**: CVスコアは高いが、実際の予測では使えない特徴量  
+
+### 不均衡データ（Imbalanced Data）
+**読み方**: ふきんこうデータ  
+**英語**: Imbalanced Data, Class Imbalance  
+**意味**: クラスの数に大きな偏りがあるデータ  
+**例**: 正常99%, 異常1%のデータ  
+**対処法**: SMOTE、重み調整、アンダー/オーバーサンプリング  
+
+---
+
+## モデル・アルゴリズム
+
+### 線形回帰（Linear Regression）
+**読み方**: せんけいかいき  
+**英語**: Linear Regression  
+**意味**: 特徴量と目的変数の間に線形関係を仮定するモデル  
+**用途**: 連続値予測、ベースライン  
+**Kaggleでの使用例**:
+```python
+from sklearn.linear_model import LinearRegression
+model = LinearRegression()
+model.fit(X_train, y_train)
+```
+
+### ロジスティック回帰（Logistic Regression）
+**読み方**: ロジスティックかいき  
+**英語**: Logistic Regression  
+**意味**: 分類問題に使用する線形モデル。確率を出力  
+**用途**: 二値分類、多クラス分類  
+**特徴**: 解釈しやすい、高速  
+
+### ランダムフォレスト（Random Forest）
+**読み方**: ランダムフォレスト  
+**英語**: Random Forest  
+**意味**: 複数の決定木を組み合わせたアンサンブルモデル  
+**特徴**: 過学習しにくい、特徴量重要度が分かる  
+**Kaggleでの使用例**:
+```python
+from sklearn.ensemble import RandomForestClassifier
+rf = RandomForestClassifier(n_estimators=100, random_state=42)
+rf.fit(X_train, y_train)
+```
+
+### XGBoost
+**読み方**: エックスジーブースト  
+**英語**: XGBoost (eXtreme Gradient Boosting)  
+**意味**: 勾配ブースティングの高性能実装  
+**特徴**: Kaggleで最も人気、高精度、高速  
+**Kaggleでの使用例**:
+```python
+import xgboost as xgb
+model = xgb.XGBClassifier(random_state=42)
+model.fit(X_train, y_train)
+```
+
+### LightGBM
+**読み方**: ライトジービーエム  
+**英語**: LightGBM (Light Gradient Boosting Machine)  
+**意味**: Microsoftが開発した高速な勾配ブースティング  
+**特徴**: XGBoostより高速、メモリ効率が良い  
+
+### CatBoost
+**読み方**: キャットブースト  
+**英語**: CatBoost  
+**意味**: Yandexが開発したカテゴリカルデータに強い勾配ブースティング  
+**特徴**: カテゴリカルデータの前処理が不要  
+
+---
+
+## 評価指標
+
+### 精度（Accuracy）
+**読み方**: せいど  
+**英語**: Accuracy  
+**意味**: 全予測のうち正解した割合  
+**計算式**: (TP + TN) / (TP + TN + FP + FN)  
+**注意点**: 不均衡データでは信頼できない  
+
+### 適合率（Precision）
+**読み方**: てきごうりつ  
+**英語**: Precision  
+**意味**: 陽性と予測したもののうち実際に陽性だった割合  
+**計算式**: TP / (TP + FP)  
+**重要性**: 偽陽性を避けたい場合に重要  
+
+### 再現率（Recall / Sensitivity）
+**読み方**: さいげんりつ  
+**英語**: Recall, Sensitivity, True Positive Rate  
+**意味**: 実際の陽性のうち正しく陽性と予測できた割合  
+**計算式**: TP / (TP + FN)  
+**重要性**: 偽陰性を避けたい場合に重要  
+
+### F1スコア（F1 Score）
+**読み方**: エフワンスコア  
+**英語**: F1 Score  
+**意味**: 適合率と再現率の調和平均  
+**計算式**: 2 × (Precision × Recall) / (Precision + Recall)  
+**用途**: 適合率と再現率のバランスを取りたい場合  
+
+### AUC-ROC
+**読み方**: エーユーシーロック  
+**英語**: AUC-ROC (Area Under Curve - Receiver Operating Characteristic)  
+**意味**: ROC曲線の下の面積。分類性能の指標  
+**範囲**: 0.5（ランダム）〜 1.0（完璧）  
+**特徴**: 閾値に依存しない評価  
+
+### 平均絶対誤差（MAE）
+**読み方**: へいきんぜったいごさ  
+**英語**: MAE (Mean Absolute Error)  
+**意味**: 予測値と実際の値の絶対差の平均  
+**計算式**: Σ|y_true - y_pred| / n  
+**特徴**: 外れ値に頑健  
+
+### 平均二乗誤差（MSE）
+**読み方**: へいきんにじょうごさ  
+**英語**: MSE (Mean Squared Error)  
+**意味**: 予測値と実際の値の二乗差の平均  
+**計算式**: Σ(y_true - y_pred)² / n  
+**特徴**: 大きな誤差をより重く扱う  
+
+### 平均二乗平方根誤差（RMSE）
+**読み方**: へいきんにじょうへいほうこんごさ  
+**英語**: RMSE (Root Mean Squared Error)  
+**意味**: MSEの平方根  
+**計算式**: √(MSE)  
+**特徴**: 元の単位と同じスケール  
+
+---
+
+## 前処理・特徴量
+
+### 標準化（Standardization）
+**読み方**: ひょうじゅんか  
+**英語**: Standardization, Z-score Normalization  
+**意味**: 平均0、標準偏差1に変換  
+**計算式**: (x - μ) / σ  
+**用途**: 線形モデル、ニューラルネットワーク  
+**Kaggleでの使用例**:
+```python
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X_train)
+```
+
+### 正規化（Normalization）
+**読み方**: せいきか  
+**英語**: Normalization, Min-Max Scaling  
+**意味**: 最小値0、最大値1に変換  
+**計算式**: (x - min) / (max - min)  
+**用途**: 0-1の範囲に収めたい場合  
+
+### ワンホットエンコーディング（One-Hot Encoding）
+**読み方**: ワンホットエンコーディング  
+**英語**: One-Hot Encoding  
+**意味**: カテゴリカル変数を0と1のダミー変数に変換  
+**例**: ['A', 'B', 'C'] → [1,0,0], [0,1,0], [0,0,1]  
+**Kaggleでの使用例**:
+```python
+df_encoded = pd.get_dummies(df, columns=['category'])
+```
+
+### ラベルエンコーディング（Label Encoding）
+**読み方**: ラベルエンコーディング  
+**英語**: Label Encoding  
+**意味**: カテゴリカル変数を整数に変換  
+**例**: ['A', 'B', 'C'] → [0, 1, 2]  
+**注意点**: 順序関係を暗示してしまう  
+
+### 特徴量エンジニアリング（Feature Engineering）
+**読み方**: とくちょうりょうエンジニアリング  
+**英語**: Feature Engineering  
+**意味**: より良い特徴量を作り出すプロセス  
+**手法**: 組み合わせ、変換、集約、時系列特徴量など  
+
+### 特徴量選択（Feature Selection）
+**読み方**: とくちょうりょうせんたく  
+**英語**: Feature Selection  
+**意味**: 重要な特徴量のみを選択すること  
+**手法**: 統計的検定、重要度ベース、再帰的特徴量除去  
+
+---
+
+## 検証・テスト
+
+### クロスバリデーション（Cross Validation）
+**読み方**: クロスバリデーション  
+**英語**: Cross Validation, CV  
+**意味**: データを複数に分割して訓練と検証を繰り返す手法  
+**目的**: モデルの汎化性能を正確に評価  
+**Kaggleでの使用例**:
+```python
+from sklearn.model_selection import cross_val_score
+scores = cross_val_score(model, X, y, cv=5)
+print(f'CV Score: {scores.mean():.3f} (+/- {scores.std() * 2:.3f})')
+```
+
+### K分割交差検証（K-Fold Cross Validation）
+**読み方**: ケーぶんかつこうさけんしょう  
+**英語**: K-Fold Cross Validation  
+**意味**: データをK個に分割し、K-1個で訓練、1個で検証を繰り返す  
+**一般的**: K=5 または K=10  
+
+### 層化K分割（Stratified K-Fold）
+**読み方**: そうかケーぶんかつ  
+**英語**: Stratified K-Fold  
+**意味**: 各分割でクラス比率を保持するK分割交差検証  
+**用途**: 分類問題、不均衡データ  
+
+### ホールドアウト法（Hold-out Method）
+**読み方**: ホールドアウトほう  
+**英語**: Hold-out Method  
+**意味**: データを訓練用とテスト用に一回だけ分割する手法  
+**割合**: 通常70-80%を訓練、20-30%をテストに使用  
+
+### 過学習（Overfitting）
+**読み方**: かがくしゅう  
+**英語**: Overfitting  
+**意味**: 訓練データに特化しすぎて、新しいデータに対する性能が悪化  
+**対策**: 正則化、早期停止、ドロップアウト、より多いデータ  
+
+### 汎化性能（Generalization Performance）
+**読み方**: はんかせいのう  
+**英語**: Generalization Performance  
+**意味**: 未知のデータに対するモデルの性能  
+**重要性**: 実際の運用での性能を表す最重要指標  
+
+---
+
+## アンサンブル
+
+### アンサンブル学習（Ensemble Learning）
+**読み方**: アンサンブルがくしゅう  
+**英語**: Ensemble Learning  
+**意味**: 複数のモデルを組み合わせて予測性能を向上させる手法  
+**効果**: 単一モデルより高性能、頑健性向上  
+
+### バギング（Bagging）
+**読み方**: バギング  
+**英語**: Bagging (Bootstrap Aggregating)  
+**意味**: 複数のモデルを並行に訓練し、結果を平均する手法  
+**例**: ランダムフォレスト  
+**特徴**: 分散を減らす効果  
+
+### ブースティング（Boosting）
+**読み方**: ブースティング  
+**英語**: Boosting  
+**意味**: 前のモデルの誤りを次のモデルで修正していく手法  
+**例**: XGBoost, LightGBM, AdaBoost  
+**特徴**: バイアスを減らす効果  
+
+### スタッキング（Stacking）
+**読み方**: スタッキング  
+**英語**: Stacking  
+**意味**: 複数のベースモデルの予測を特徴量として、メタモデルで最終予測  
+**特徴**: 最も高性能なアンサンブル手法の一つ  
+**Kaggleでの重要性**: 上位入賞の必須テクニック  
+
+### ブレンディング（Blending）
+**読み方**: ブレンディング  
+**英語**: Blending  
+**意味**: 複数モデルの予測を重み付き平均で組み合わせる  
+**例**: 0.4×Model1 + 0.6×Model2  
+**特徴**: シンプルで効果的  
+
+---
+
+## Kaggle特有用語
+
+### リーダーボード（Leaderboard）
+**読み方**: リーダーボード  
+**英語**: Leaderboard, LB  
+**意味**: コンペティション参加者のスコアランキング  
+**種類**: Public LB（一部テストデータ）、Private LB（残りテストデータ）  
+
+### シェイクアップ（Shake-up）
+**読み方**: シェイクアップ  
+**英語**: Shake-up  
+**意味**: Private LBで順位が大きく変動すること  
+**原因**: Public LBへの過学習、テストデータの偏り  
+
+### Public/Private スコア
+**読み方**: パブリック/プライベート スコア  
+**英語**: Public/Private Score  
+**意味**: 
+- Public: コンペ中に見えるスコア（テストデータの一部）
+- Private: 最終順位決定のスコア（テストデータの残り）  
+
+### サブミッション（Submission）
+**読み方**: サブミッション  
+**英語**: Submission  
+**意味**: 予測結果の提出  
+**制限**: 1日の提出回数に上限あり  
+
+### ベースライン（Baseline）
+**読み方**: ベースライン  
+**英語**: Baseline  
+**意味**: 比較対象となる基本的なモデル  
+**例**: 平均値予測、単純な線形回帰  
+
+### 上位解法（Winning Solution）
+**読み方**: じょういかいほう  
+**英語**: Winning Solution  
+**意味**: コンペティション上位者の解法  
+**学習価値**: 新しいテクニックや知見を得られる  
+
+### EDA（Exploratory Data Analysis）
+**読み方**: イーディーエー  
+**英語**: EDA (Exploratory Data Analysis)  
+**意味**: 探索的データ分析。データの特徴を理解するための分析  
+**内容**: 可視化、統計量計算、相関分析など  
+
+### CV（Cross Validation）スコア
+**読み方**: シーブイスコア  
+**英語**: CV Score  
+**意味**: クロスバリデーションで得られるスコア  
+**重要性**: LBスコアより信頼できる性能指標  
+
+### LB（Leaderboard）プローブ
+**読み方**: エルビープローブ  
+**英語**: LB Probing  
+**意味**: Public LBのテストデータを推測しようとする行為  
+**注意**: 過度に行うとPrivate LBで大幅下落のリスク  
+
+---
+
+## 📊 実用的な使用例
+
+### モデル訓練の基本フロー
+```python
+# 1. データ分割
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# 2. モデル訓練
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+
+# 3. 検証
+val_pred = model.predict(X_val)
+val_score = accuracy_score(y_val, val_pred)
+print(f'Validation Accuracy: {val_score:.3f}')
+
+# 4. テスト予測
+test_pred = model.predict(X_test)
+```
+
+### CV評価の実装
+```python
+from s
