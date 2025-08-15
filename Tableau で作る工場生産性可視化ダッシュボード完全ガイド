@@ -1,0 +1,354 @@
+# Tableau で作る工場生産性可視化ダッシュボード完全ガイド
+
+## 📚 はじめに
+
+製造業において生産性の可視化は経営判断の要となります。本記事では、Tableau を使って工場の生産性を効果的に可視化するダッシュボードの作成方法を、新人エンジニアの方でも理解できるよう段階的に解説します。
+
+**対象読者**
+- Tableau 初心者〜中級者
+- 製造業でのデータ分析担当者
+- 工場の生産性改善に携わるエンジニア
+
+## 🎯 ダッシュボードで実現できること
+
+### 基本機能
+- リアルタイムでの生産量・品質監視
+- 設備稼働率の可視化
+- 不良率・歩留まりの追跡
+- 作業者別・ライン別パフォーマンス比較
+
+### 応用機能
+- 生産量予測
+- 設備故障予測
+- 需要予測に基づく生産計画最適化
+
+## 📊 必要なデータの準備
+
+### 1. 基本データセット
+
+```
+生産データテーブル例：
+- 日付時刻 (DateTime)
+- ライン番号 (Line_ID)
+- 製品種別 (Product_Type)
+- 生産数量 (Production_Quantity)
+- 良品数量 (Good_Quantity)
+- 不良数量 (Defect_Quantity)
+- 作業者ID (Worker_ID)
+- 稼働時間 (Operating_Hours)
+- 停止時間 (Downtime_Hours)
+- 設備温度 (Equipment_Temperature)
+- 電力消費量 (Power_Consumption)
+```
+
+### 2. マスターデータ
+
+```
+設備マスター：
+- 設備ID (Equipment_ID)
+- 設備名 (Equipment_Name)
+- 設置場所 (Location)
+- 定格能力 (Rated_Capacity)
+
+作業者マスター：
+- 作業者ID (Worker_ID)
+- 作業者名 (Worker_Name)
+- スキルレベル (Skill_Level)
+- 所属部署 (Department)
+```
+
+## 🔧 基本ダッシュボードの作成手順
+
+### Step 1: データソースの接続
+
+1. Tableau Desktop を起動
+2. 「データに接続」から適切なデータソースを選択
+   - Excel ファイル
+   - CSV ファイル
+   - データベース（SQL Server、Oracle等）
+3. データの結合・整形
+   - 生産データとマスターデータの結合
+   - 計算フィールドの作成
+
+### Step 2: 基本KPIの計算フィールド作成
+
+```tableau
+// 歩留まり率
+Yield_Rate = [Good_Quantity] / [Production_Quantity]
+
+// 設備稼働率
+OEE = [Operating_Hours] / ([Operating_Hours] + [Downtime_Hours])
+
+// 時間当たり生産性
+Productivity_Per_Hour = [Production_Quantity] / [Operating_Hours]
+
+// 不良率
+Defect_Rate = [Defect_Quantity] / [Production_Quantity]
+
+// 電力効率
+Power_Efficiency = [Production_Quantity] / [Power_Consumption]
+```
+
+### Step 3: 基本チャートの作成
+
+#### 3.1 生産量トレンドチャート
+- **チャート種類**: 折れ線グラフ
+- **X軸**: 日付時刻
+- **Y軸**: 生産数量
+- **詳細**: ライン別で色分け
+
+#### 3.2 設備稼働率ダッシュボード
+- **チャート種類**: ガントチャート or ヒートマップ
+- **行**: 設備ID
+- **列**: 日付
+- **色**: 稼働率（緑：高稼働、赤：低稼働）
+
+#### 3.3 品質管理チャート
+- **チャート種類**: デュアルアクシスチャート
+- **主軸**: 生産数量（棒グラフ）
+- **副軸**: 不良率（折れ線グラフ）
+
+### Step 4: インタラクティブフィルターの追加
+
+```tableau
+// 日付範囲フィルター
+Date Range Filter: 過去30日間をデフォルトに設定
+
+// ライン選択フィルター
+Line Filter: 複数選択可能なドロップダウン
+
+// 製品種別フィルター
+Product Type Filter: チェックボックス形式
+```
+
+## 📈 応用編：予測機能の実装
+
+### 1. 生産量予測
+
+#### 1.1 時系列予測の実装
+
+```tableau
+// Tableau の予測機能を使用
+1. 生産量トレンドチャートを選択
+2. 分析タブ → 予測線を追加
+3. 予測設定：
+   - 予測期間: 30日間
+   - 信頼区間: 95%
+   - 季節性: 自動検出
+```
+
+#### 1.2 カスタム予測モデル
+
+```tableau
+// 移動平均予測
+Moving_Average_7D = WINDOW_AVG(SUM([Production_Quantity]), -6, 0)
+
+// 指数平滑化予測
+// R スクリプトまたは Python スクリプトを使用
+SCRIPT_REAL("
+import pandas as pd
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# データの準備
+data = pd.Series(_arg1, index=pd.to_datetime(_arg2))
+
+# 指数平滑化モデル
+model = ExponentialSmoothing(data, seasonal='add', seasonal_periods=7)
+fit = model.fit()
+
+# 予測
+forecast = fit.forecast(steps=7)
+return forecast.tolist()
+", SUM([Production_Quantity]), [Date])
+```
+
+### 2. 設備故障予測
+
+#### 2.1 異常検知ダッシュボード
+
+```tableau
+// 温度異常フラグ
+Temperature_Anomaly = 
+IF [Equipment_Temperature] > WINDOW_AVG([Equipment_Temperature], -30, -1) + 
+   2 * WINDOW_STDEV([Equipment_Temperature], -30, -1) THEN "異常"
+ELSE "正常" END
+
+// 振動データ異常検知（仮想データ）
+Vibration_Alert = 
+IF [Vibration_Level] > [Normal_Vibration_Threshold] THEN "要注意"
+ELSE "正常" END
+```
+
+#### 2.2 予防保全スケジュール
+
+```tableau
+// 次回メンテナンス予定日計算
+Next_Maintenance = 
+DATEADD('day', [Maintenance_Interval_Days], [Last_Maintenance_Date])
+
+// メンテナンス緊急度
+Maintenance_Priority = 
+IF DATEDIFF('day', TODAY(), [Next_Maintenance]) <= 7 THEN "緊急"
+ELSEIF DATEDIFF('day', TODAY(), [Next_Maintenance]) <= 14 THEN "注意"
+ELSE "正常" END
+```
+
+### 3. 需要予測に基づく生産最適化
+
+#### 3.1 需要予測モデル
+
+```tableau
+// 季節性を考慮した需要予測
+SCRIPT_REAL("
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+
+# データ準備
+X = np.array(_arg1).reshape(-1, 1)  # 日付データ
+y = np.array(_arg2)  # 需要データ
+
+# 多項式回帰で季節性を捉える
+poly_features = PolynomialFeatures(degree=3)
+X_poly = poly_features.fit_transform(X)
+
+# モデル学習
+model = LinearRegression()
+model.fit(X_poly, y)
+
+# 予測
+future_dates = np.arange(max(X) + 1, max(X) + 31).reshape(-1, 1)
+future_poly = poly_features.transform(future_dates)
+predictions = model.predict(future_poly)
+
+return predictions.tolist()
+", [Date_Numeric], [Demand_Quantity])
+```
+
+## 🎨 ダッシュボードデザインのベストプラクティス
+
+### 1. レイアウト設計
+
+```
+ダッシュボード構成例：
+┌─────────────────────────────────────────┐
+│ KPIサマリー（生産量・稼働率・品質）      │
+├─────────────────────────────────────────┤
+│ 生産トレンド │ 設備稼働状況           │
+│ チャート     │ ヒートマップ           │
+├─────────────│─────────────────────────┤
+│ 品質管理     │ アラート・通知         │
+│ チャート     │ テーブル               │
+└─────────────────────────────────────────┘
+```
+
+### 2. 色の使い分け
+
+- **緑系**: 良好な状態（高稼働率、低不良率）
+- **黄系**: 注意が必要な状態
+- **赤系**: 異常・緊急状態
+- **青系**: 中性的な情報表示
+
+### 3. アラート機能の実装
+
+```tableau
+// 稼働率低下アラート
+OEE_Alert = 
+IF [OEE] < 0.75 THEN "🔴 稼働率低下"
+ELSEIF [OEE] < 0.85 THEN "🟡 稼働率注意"
+ELSE "🟢 正常" END
+
+// 品質異常アラート
+Quality_Alert = 
+IF [Defect_Rate] > 0.05 THEN "🔴 品質異常"
+ELSEIF [Defect_Rate] > 0.02 THEN "🟡 品質注意"
+ELSE "🟢 正常" END
+```
+
+## 📱 モバイル対応とリアルタイム更新
+
+### 1. モバイルレイアウト
+
+```tableau
+// デバイス別レイアウト設定
+Device Layout: Default → Add Phone Layout
+- フォントサイズを大きく
+- チャート数を削減（重要KPIのみ表示）
+- タッチ操作に配慮したボタンサイズ
+```
+
+### 2. リアルタイム更新設定
+
+```tableau
+// データ更新頻度設定
+Refresh Settings:
+- 増分更新: 5分間隔
+- 完全更新: 1日1回（深夜時間帯）
+- ライブ接続: 重要KPIのみ
+```
+
+## 🚀 パフォーマンス最適化
+
+### 1. データ抽出とフィルタリング
+
+```tableau
+// データ抽出時の最適化
+Extract Filters:
+- 直近3ヶ月のデータのみ抽出
+- 不要な列を除外
+- 事前集計の実行
+
+// 計算フィールドの最適化
+// 非効率な例
+BAD: IF CONTAINS([Product_Name], "製品A") THEN "A" ELSE "その他" END
+
+// 効率的な例
+GOOD: CASE [Product_Code] 
+WHEN "A001" THEN "A"
+WHEN "A002" THEN "A"
+ELSE "その他" END
+```
+
+### 2. インデックス付きフィールドの活用
+
+```sql
+-- データベース側での最適化
+CREATE INDEX idx_production_date ON production_data(date_time);
+CREATE INDEX idx_production_line ON production_data(line_id);
+CREATE INDEX idx_production_product ON production_data(product_type);
+```
+
+## 📋 チェックリスト
+
+### 基本機能
+- [ ] データソース接続完了
+- [ ] 基本KPI計算フィールド作成
+- [ ] 生産トレンドチャート作成
+- [ ] 設備稼働率可視化
+- [ ] 品質管理チャート作成
+- [ ] フィルター機能実装
+
+### 応用機能
+- [ ] 生産量予測機能
+- [ ] 設備故障予測
+- [ ] アラート機能
+- [ ] モバイル対応
+- [ ] リアルタイム更新設定
+
+### 運用準備
+- [ ] ユーザー権限設定
+- [ ] 自動更新スケジュール
+- [ ] バックアップ設定
+- [ ] パフォーマンステスト完了
+
+## 🎓 まとめ
+
+工場生産性の可視化ダッシュボードは、現状把握から予測・最適化まで段階的に機能を拡張していくことが重要です。まずは基本的なKPIの可視化から始めて、運用に慣れてきたら予測機能や高度な分析機能を追加していきましょう。
+
+**成功のポイント**
+1. **現場のニーズを最優先**：実際に使用する人の声を反映
+2. **段階的な構築**：一度にすべてを実装せず、優先順位をつけて開発
+3. **継続的な改善**：運用開始後もフィードバックを基に改善を続ける
+4. **データ品質の確保**：正確な分析には高品質なデータが不可欠
+
+このガイドを参考に、あなたの工場に最適な生産性ダッシュボードを作成してください。データドリブンな意思決定により、工場の生産性向上を実現しましょう！
