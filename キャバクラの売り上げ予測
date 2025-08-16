@@ -1,0 +1,1163 @@
+# キャバクラ売上予測ダッシュボード構築ガイド
+
+接客業における売上分析とキャスト管理は、経営の重要な要素です。このガイドでは、Excelデータを基にした売上予測システムとダッシュボードの作り方を実践的に解説します。
+
+## 目次
+1. [データ設計とExcel入力フォーマット](#1-データ設計とexcel入力フォーマット)
+2. [Pythonでのデータ処理](#2-pythonでのデータ処理)
+3. [売上予測モデルの構築](#3-売上予測モデルの構築)
+4. [ダッシュボードの作成](#4-ダッシュボードの作成)
+5. [運用とメンテナンス](#5-運用とメンテナンス)
+
+---
+
+## 1. データ設計とExcel入力フォーマット
+
+### 基本データ構造
+
+#### キャストマスターデータ（cast_master.xlsx）
+```
+| キャストID | 名前 | 入店日 | ランク | 基本時給 | 経験年数 | 年齢 | タイプ |
+|-----------|------|--------|--------|----------|----------|------|--------|
+| C001      | 花音 | 2023-01-15 | S | 3000 | 2.5 | 22 | 可愛い系 |
+| C002      | 美咲 | 2022-06-01 | A | 2500 | 1.8 | 24 | お姉さん系 |
+| C003      | 麗奈 | 2023-03-10 | B | 2000 | 0.8 | 20 | 清楚系 |
+```
+
+#### 日次売上データ（daily_sales.xlsx）
+```
+| 日付 | キャストID | 出勤時間 | 退勤時間 | 接客時間 | 同伴数 | 指名数 | ドリンク数 | ボトル数 | 売上金額 | 天気 | 曜日 | イベント |
+|------|-----------|----------|----------|----------|--------|--------|------------|----------|----------|------|------|----------|
+| 2024-01-15 | C001 | 20:00 | 01:00 | 5.0 | 1 | 3 | 12 | 2 | 180000 | 晴れ | 月 | 新年会 |
+| 2024-01-15 | C002 | 19:30 | 01:30 | 6.0 | 0 | 5 | 15 | 1 | 220000 | 晴れ | 月 | 新年会 |
+```
+
+#### 顧客データ（customer_data.xlsx）
+```
+| 顧客ID | 年齢 | 職業 | 年収レンジ | 来店頻度 | 平均単価 | 好みタイプ | 担当キャスト |
+|--------|------|------|------------|----------|----------|------------|--------------|
+| CU001 | 45 | 会社員 | 600-800万 | 月2回 | 50000 | お姉さん系 | C002 |
+| CU002 | 38 | 経営者 | 1000万以上 | 週1回 | 120000 | 可愛い系 | C001 |
+```
+
+### Excelテンプレートの作成
+
+```python
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+
+def create_excel_templates():
+    """売上管理用のExcelテンプレートを作成"""
+    
+    # キャストマスターのテンプレート
+    cast_columns = [
+        'キャストID', '名前', '入店日', 'ランク', '基本時給', 
+        '経験年数', '年齢', 'タイプ', '特技', '出身地'
+    ]
+    
+    # 日次売上のテンプレート
+    daily_columns = [
+        '日付', 'キャストID', '出勤時間', '退勤時間', '接客時間',
+        '同伴数', '指名数', 'ドリンク数', 'ボトル数', '売上金額',
+        '天気', '曜日', 'イベント', '客層', '備考'
+    ]
+    
+    # 顧客データのテンプレート
+    customer_columns = [
+        '顧客ID', '名前', '年齢', '職業', '年収レンジ', '来店頻度',
+        '平均単価', '好みタイプ', '担当キャスト', '初回来店日', '最終来店日'
+    ]
+    
+    # Excelファイル作成
+    with pd.ExcelWriter('キャバクラ売上管理テンプレート.xlsx', engine='openpyxl') as writer:
+        # 空のDataFrameを作成してテンプレートとして保存
+        pd.DataFrame(columns=cast_columns).to_excel(writer, sheet_name='キャストマスター', index=False)
+        pd.DataFrame(columns=daily_columns).to_excel(writer, sheet_name='日次売上', index=False)
+        pd.DataFrame(columns=customer_columns).to_excel(writer, sheet_name='顧客データ', index=False)
+        
+        # 入力例シートも作成
+        create_sample_data().to_excel(writer, sheet_name='入力例', index=False)
+    
+    print("✅ Excelテンプレートを作成しました")
+
+def create_sample_data():
+    """サンプルデータを作成"""
+    
+    # サンプルの日次売上データ
+    sample_data = []
+    cast_ids = ['C001', 'C002', 'C003', 'C004', 'C005']
+    
+    for i in range(30):  # 30日分のサンプル
+        date = datetime.now() - timedelta(days=i)
+        
+        for cast_id in np.random.choice(cast_ids, size=np.random.randint(2, 4), replace=False):
+            sample_data.append({
+                '日付': date.strftime('%Y-%m-%d'),
+                'キャストID': cast_id,
+                '出勤時間': '20:00',
+                '退勤時間': '01:00',
+                '接客時間': round(np.random.normal(4.5, 1.5), 1),
+                '同伴数': np.random.poisson(0.3),
+                '指名数': np.random.poisson(2.5),
+                'ドリンク数': np.random.poisson(8),
+                'ボトル数': np.random.poisson(1.2),
+                '売上金額': np.random.normal(150000, 50000),
+                '天気': np.random.choice(['晴れ', '曇り', '雨']),
+                '曜日': date.strftime('%a'),
+                'イベント': np.random.choice(['なし', '忘年会', '歓送迎会', 'クリスマス'], p=[0.7, 0.1, 0.1, 0.1])
+            })
+    
+    return pd.DataFrame(sample_data)
+
+# テンプレート作成
+create_excel_templates()
+```
+
+---
+
+## 2. Pythonでのデータ処理
+
+### データ読み込みと前処理
+
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+import warnings
+warnings.filterwarnings('ignore')
+
+class CabaretDataProcessor:
+    def __init__(self):
+        self.scaler = StandardScaler()
+        self.label_encoders = {}
+        
+    def load_excel_data(self, file_path):
+        """Excelファイルから全シートを読み込み"""
+        try:
+            # 全シートを読み込み
+            excel_file = pd.ExcelFile(file_path)
+            data_dict = {}
+            
+            for sheet_name in excel_file.sheet_names:
+                data_dict[sheet_name] = pd.read_excel(file_path, sheet_name=sheet_name)
+                print(f"✅ {sheet_name}シート読み込み完了: {data_dict[sheet_name].shape}")
+            
+            return data_dict
+            
+        except Exception as e:
+            print(f"❌ ファイル読み込みエラー: {e}")
+            return None
+    
+    def preprocess_daily_sales(self, df):
+        """日次売上データの前処理"""
+        
+        df = df.copy()
+        
+        # 日付型に変換
+        df['日付'] = pd.to_datetime(df['日付'])
+        
+        # 時間系特徴量の作成
+        df['年'] = df['日付'].dt.year
+        df['月'] = df['日付'].dt.month
+        df['日'] = df['日付'].dt.day
+        df['曜日番号'] = df['日付'].dt.dayofweek  # 0=月曜日
+        df['週末フラグ'] = (df['曜日番号'] >= 5).astype(int)
+        
+        # 月末・月初フラグ
+        df['月末フラグ'] = (df['日付'].dt.day >= 25).astype(int)
+        df['月初フラグ'] = (df['日付'].dt.day <= 5).astype(int)
+        
+        # 売上効率指標
+        df['時間単価'] = df['売上金額'] / (df['接客時間'] + 0.1)  # ゼロ除算対策
+        df['指名単価'] = df['売上金額'] / (df['指名数'] + 1)
+        
+        # 接客密度
+        df['ドリンク密度'] = df['ドリンク数'] / (df['接客時間'] + 0.1)
+        df['指名密度'] = df['指名数'] / (df['接客時間'] + 0.1)
+        
+        # カテゴリ変数のエンコーディング
+        categorical_columns = ['天気', 'イベント', 'キャストID']
+        
+        for col in categorical_columns:
+            if col in df.columns:
+                if col not in self.label_encoders:
+                    self.label_encoders[col] = LabelEncoder()
+                    df[f'{col}_encoded'] = self.label_encoders[col].fit_transform(df[col].astype(str))
+                else:
+                    df[f'{col}_encoded'] = self.label_encoders[col].transform(df[col].astype(str))
+        
+        print("✅ 日次売上データの前処理完了")
+        return df
+    
+    def create_aggregated_features(self, df):
+        """集約特徴量を作成"""
+        
+        # キャスト別の統計量
+        cast_stats = df.groupby('キャストID').agg({
+            '売上金額': ['mean', 'std', 'max', 'count'],
+            '指名数': ['mean', 'sum'],
+            '同伴数': ['mean', 'sum'],
+            '接客時間': ['mean'],
+            '時間単価': ['mean']
+        }).round(2)
+        
+        # カラム名を平坦化
+        cast_stats.columns = ['_'.join(col).strip() for col in cast_stats.columns]
+        cast_stats = cast_stats.reset_index()
+        
+        # 元データにマージ
+        df = df.merge(cast_stats, on='キャストID', how='left', suffixes=('', '_avg'))
+        
+        # 過去N日間の売上トレンド
+        df = df.sort_values(['キャストID', '日付'])
+        df['売上_7日平均'] = df.groupby('キャストID')['売上金額'].rolling(window=7, min_periods=1).mean().reset_index(0, drop=True)
+        df['売上_30日平均'] = df.groupby('キャストID')['売上金額'].rolling(window=30, min_periods=1).mean().reset_index(0, drop=True)
+        
+        print("✅ 集約特徴量の作成完了")
+        return df
+
+# 使用例
+processor = CabaretDataProcessor()
+
+# サンプルデータで動作確認
+sample_df = create_sample_data()
+processed_df = processor.preprocess_daily_sales(sample_df)
+final_df = processor.create_aggregated_features(processed_df)
+
+print("📊 処理済みデータの確認:")
+print(final_df.head())
+print(f"データ形状: {final_df.shape}")
+```
+
+---
+
+## 3. 売上予測モデルの構築
+
+### 予測モデルの作成
+
+```python
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.ensemble import GradientBoostingRegressor
+import joblib
+
+class SalesPredictionModel:
+    def __init__(self):
+        self.models = {}
+        self.feature_importance = {}
+        self.scaler = StandardScaler()
+        
+    def prepare_features(self, df):
+        """予測用の特徴量を準備"""
+        
+        # 予測に使用する特徴量を選択
+        feature_columns = [
+            '接客時間', '指名数', '同伴数', 'ドリンク数', 'ボトル数',
+            '曜日番号', '週末フラグ', '月末フラグ', '月初フラグ',
+            '天気_encoded', 'イベント_encoded', 'キャストID_encoded',
+            '売上金額_mean', '指名数_mean', '時間単価_mean',
+            '売上_7日平均', '売上_30日平均'
+        ]
+        
+        # 利用可能な特徴量のみを選択
+        available_features = [col for col in feature_columns if col in df.columns]
+        
+        X = df[available_features].copy()
+        
+        # 欠損値を平均値で補完
+        X = X.fillna(X.mean())
+        
+        return X, available_features
+    
+    def train_models(self, df, target_column='売上金額'):
+        """複数のモデルを学習"""
+        
+        X, feature_names = self.prepare_features(df)
+        y = df[target_column]
+        
+        # データ分割
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        
+        # 特徴量スケーリング
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # 複数モデルの定義
+        models_config = {
+            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
+            'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
+            'Linear Regression': LinearRegression()
+        }
+        
+        results = {}
+        
+        for name, model in models_config.items():
+            print(f"\n🤖 {name}モデルの学習中...")
+            
+            # モデルによってスケーリングの要否を判断
+            if name == 'Linear Regression':
+                model.fit(X_train_scaled, y_train)
+                y_pred = model.predict(X_test_scaled)
+            else:
+                model.fit(X_train, y_train)
+                y_pred = model.predict(X_test)
+            
+            # 評価指標計算
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
+            mae = mean_absolute_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            
+            results[name] = {
+                'model': model,
+                'rmse': rmse,
+                'mae': mae,
+                'r2': r2,
+                'predictions': y_pred
+            }
+            
+            # 特徴量重要度（Random ForestとGradient Boostingのみ）
+            if hasattr(model, 'feature_importances_'):
+                self.feature_importance[name] = dict(
+                    zip(feature_names, model.feature_importances_)
+                )
+            
+            print(f"✅ RMSE: {rmse:,.0f}, MAE: {mae:,.0f}, R²: {r2:.3f}")
+        
+        self.models = results
+        self.feature_names = feature_names
+        
+        # 最適モデルの選択（R²が最高のもの）
+        best_model_name = max(results.keys(), key=lambda k: results[k]['r2'])
+        self.best_model = results[best_model_name]['model']
+        self.best_model_name = best_model_name
+        
+        print(f"\n🏆 最適モデル: {best_model_name} (R²: {results[best_model_name]['r2']:.3f})")
+        
+        return results
+    
+    def predict_sales(self, new_data):
+        """新しいデータに対して売上予測"""
+        
+        X_new, _ = self.prepare_features(new_data)
+        
+        if self.best_model_name == 'Linear Regression':
+            X_new_scaled = self.scaler.transform(X_new)
+            predictions = self.best_model.predict(X_new_scaled)
+        else:
+            predictions = self.best_model.predict(X_new)
+        
+        return predictions
+    
+    def save_model(self, file_path):
+        """モデルを保存"""
+        joblib.dump({
+            'model': self.best_model,
+            'scaler': self.scaler,
+            'feature_names': self.feature_names,
+            'model_name': self.best_model_name
+        }, file_path)
+        print(f"✅ モデルを保存しました: {file_path}")
+
+# モデル学習の実行
+predictor = SalesPredictionModel()
+model_results = predictor.train_models(final_df)
+
+# 特徴量重要度の可視化
+def plot_feature_importance(predictor, model_name='Random Forest'):
+    """特徴量重要度を可視化"""
+    
+    if model_name in predictor.feature_importance:
+        importance_dict = predictor.feature_importance[model_name]
+        
+        # 重要度順にソート
+        sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)
+        
+        features, importance = zip(*sorted_features[:10])  # 上位10個
+        
+        plt.figure(figsize=(10, 6))
+        plt.barh(range(len(features)), importance)
+        plt.yticks(range(len(features)), features)
+        plt.xlabel('重要度')
+        plt.title(f'{model_name} - 特徴量重要度 Top 10')
+        plt.gca().invert_yaxis()
+        plt.tight_layout()
+        plt.show()
+
+plot_feature_importance(predictor)
+```
+
+### 予測精度の検証
+
+```python
+def validate_predictions(predictor, df):
+    """予測精度を詳細に検証"""
+    
+    # 実際の予測実行
+    predictions = predictor.predict_sales(df)
+    actual = df['売上金額'].values
+    
+    # 残差分析
+    residuals = actual - predictions
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # 予測値 vs 実測値
+    axes[0, 0].scatter(predictions, actual, alpha=0.6)
+    axes[0, 0].plot([actual.min(), actual.max()], [actual.min(), actual.max()], 'r--', lw=2)
+    axes[0, 0].set_xlabel('予測値')
+    axes[0, 0].set_ylabel('実測値')
+    axes[0, 0].set_title('予測値 vs 実測値')
+    
+    # 残差プロット
+    axes[0, 1].scatter(predictions, residuals, alpha=0.6)
+    axes[0, 1].axhline(y=0, color='r', linestyle='--')
+    axes[0, 1].set_xlabel('予測値')
+    axes[0, 1].set_ylabel('残差')
+    axes[0, 1].set_title('残差プロット')
+    
+    # 残差の分布
+    axes[1, 0].hist(residuals, bins=30, alpha=0.7)
+    axes[1, 0].set_xlabel('残差')
+    axes[1, 0].set_ylabel('頻度')
+    axes[1, 0].set_title('残差の分布')
+    
+    # 時系列での予測精度
+    if '日付' in df.columns:
+        df_with_pred = df.copy()
+        df_with_pred['予測値'] = predictions
+        daily_actual = df_with_pred.groupby('日付')['売上金額'].sum()
+        daily_pred = df_with_pred.groupby('日付')['予測値'].sum()
+        
+        axes[1, 1].plot(daily_actual.index, daily_actual.values, label='実測値', marker='o')
+        axes[1, 1].plot(daily_pred.index, daily_pred.values, label='予測値', marker='s')
+        axes[1, 1].set_xlabel('日付')
+        axes[1, 1].set_ylabel('日次売上合計')
+        axes[1, 1].set_title('日次売上：実測値 vs 予測値')
+        axes[1, 1].legend()
+        axes[1, 1].tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 精度指標の表示
+    mse = mean_squared_error(actual, predictions)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(actual, predictions)
+    r2 = r2_score(actual, predictions)
+    
+    print("📊 予測精度指標:")
+    print(f"  RMSE: ¥{rmse:,.0f}")
+    print(f"  MAE: ¥{mae:,.0f}")
+    print(f"  R²: {r2:.3f}")
+    print(f"  平均絶対誤差率: {(mae/actual.mean())*100:.1f}%")
+
+validate_predictions(predictor, final_df)
+```
+
+---
+
+## 4. ダッシュボードの作成
+
+### Streamlitを使用したWebダッシュボード
+
+```python
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import datetime
+
+def create_dashboard():
+    """Streamlitダッシュボードのメイン関数"""
+    
+    st.set_page_config(page_title="キャバクラ売上分析ダッシュボード", layout="wide")
+    
+    st.title("🍾 売上分析ダッシュボード")
+    st.sidebar.title("設定メニュー")
+    
+    # サイドバーでの設定
+    st.sidebar.header("📅 期間設定")
+    start_date = st.sidebar.date_input("開始日", datetime.date.today() - datetime.timedelta(days=30))
+    end_date = st.sidebar.date_input("終了日", datetime.date.today())
+    
+    # キャスト選択
+    st.sidebar.header("👥 キャスト選択")
+    available_casts = ['全体', 'C001', 'C002', 'C003', 'C004', 'C005']
+    selected_cast = st.sidebar.selectbox("キャスト", available_casts)
+    
+    # データ読み込み（実際の実装では外部ファイルから読み込み）
+    @st.cache_data
+    def load_data():
+        return create_sample_data()
+    
+    df = load_data()
+    df['日付'] = pd.to_datetime(df['日付'])
+    
+    # 期間でフィルタ
+    mask = (df['日付'] >= pd.to_datetime(start_date)) & (df['日付'] <= pd.to_datetime(end_date))
+    filtered_df = df[mask]
+    
+    # キャストでフィルタ
+    if selected_cast != '全体':
+        filtered_df = filtered_df[filtered_df['キャストID'] == selected_cast]
+    
+    # メイン表示エリア
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # KPIメトリクス
+    with col1:
+        total_sales = filtered_df['売上金額'].sum()
+        st.metric("総売上", f"¥{total_sales:,.0f}")
+    
+    with col2:
+        avg_sales = filtered_df['売上金額'].mean()
+        st.metric("平均日次売上", f"¥{avg_sales:,.0f}")
+    
+    with col3:
+        total_customers = filtered_df['指名数'].sum()
+        st.metric("総指名数", f"{total_customers:,.0f}")
+    
+    with col4:
+        avg_hourly_rate = (filtered_df['売上金額'] / filtered_df['接客時間']).mean()
+        st.metric("平均時間単価", f"¥{avg_hourly_rate:,.0f}")
+    
+    # グラフエリア
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 売上トレンド", "👥 キャスト分析", "🎯 予測", "📊 詳細分析"])
+    
+    with tab1:
+        create_sales_trend_chart(filtered_df)
+    
+    with tab2:
+        create_cast_analysis_chart(filtered_df)
+    
+    with tab3:
+        create_prediction_interface(predictor)
+    
+    with tab4:
+        create_detailed_analysis(filtered_df)
+
+def create_sales_trend_chart(df):
+    """売上トレンドチャートを作成"""
+    
+    st.subheader("📈 日次売上トレンド")
+    
+    # 日次売上集計
+    daily_sales = df.groupby('日付')['売上金額'].sum().reset_index()
+    
+    fig = px.line(daily_sales, x='日付', y='売上金額', 
+                  title="日次売上推移",
+                  labels={'売上金額': '売上金額 (¥)', '日付': '日付'})
+    
+    fig.update_layout(height=400)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 曜日別売上
+    df['曜日'] = df['日付'].dt.day_name()
+    weekday_sales = df.groupby('曜日')['売上金額'].mean().reindex([
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+    ])
+    
+    fig2 = px.bar(x=weekday_sales.index, y=weekday_sales.values,
+                  title="曜日別平均売上",
+                  labels={'x': '曜日', 'y': '平均売上 (¥)'})
+    
+    fig2.update_layout(height=400)
+    st.plotly_chart(fig2, use_container_width=True)
+
+def create_cast_analysis_chart(df):
+    """キャスト分析チャートを作成"""
+    
+    st.subheader("👥 キャスト別分析")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # キャスト別売上
+        cast_sales = df.groupby('キャストID')['売上金額'].sum().sort_values(ascending=False)
+        
+        fig = px.bar(x=cast_sales.index, y=cast_sales.values,
+                     title="キャスト別総売上",
+                     labels={'x': 'キャストID', 'y': '総売上 (¥)'})
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # キャスト別時間単価
+        cast_hourly = (df.groupby('キャストID')['売上金額'].sum() / 
+                      df.groupby('キャストID')['接客時間'].sum()).sort_values(ascending=False)
+        
+        fig2 = px.bar(x=cast_hourly.index, y=cast_hourly.values,
+                      title="キャスト別時間単価",
+                      labels={'x': 'キャストID', 'y': '時間単価 (¥/h)'})
+        
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    # 散布図：指名数 vs 売上
+    fig3 = px.scatter(df, x='指名数', y='売上金額', color='キャストID',
+                      title="指名数 vs 売上金額",
+                      labels={'指名数': '指名数', '売上金額': '売上金額 (¥)'})
+    
+    st.plotly_chart(fig3, use_container_width=True)
+
+def create_prediction_interface(predictor):
+    """予測インターフェースを作成"""
+    
+    st.subheader("🎯 売上予測")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("### 予測条件を入力")
+        
+        # 入力フォーム
+        cast_id = st.selectbox("キャストID", ['C001', 'C002', 'C003', 'C004', 'C005'])
+        work_hours = st.slider("接客時間", 1.0, 8.0, 5.0, 0.5)
+        appointments = st.slider("指名数", 0, 10, 3)
+        companion = st.slider("同伴数", 0, 3, 0)
+        drinks = st.slider("ドリンク数", 0, 20, 8)
+        bottles = st.slider("ボトル数", 0, 5, 1)
+        
+        weather = st.selectbox("天気", ['晴れ', '曇り', '雨'])
+        is_weekend = st.checkbox("週末")
+        has_event = st.selectbox("イベント", ['なし', '忘年会', '歓送迎会', 'クリスマス'])
+        
+        if st.button("売上予測実行"):
+            # 予測データの準備
+            prediction_data = pd.DataFrame({
+                'キャストID': [cast_id],
+                '接客時間': [work_hours],
+                '指名数': [appointments],
+                '同伴数': [companion],
+                'ドリンク数': [drinks],
+                'ボトル数': [bottles],
+                '天気': [weather],
+                'イベント': [has_event],
+                '週末フラグ': [1 if is_weekend else 0],
+                '月末フラグ': [0],  # デフォルト値
+                '月初フラグ': [0],  # デフォルト値
+                '曜日番号': [5 if is_weekend else 2]  # デフォルト値
+            })
+            
+            # ダミーの予測（実際には学習済みモデルを使用）
+            base_sales = work_hours * 25000  # 基本時間単価
+            appointment_bonus = appointments * 15000
+            companion_bonus = companion * 30000
+            drink_bonus = drinks * 2000
+            bottle_bonus = bottles * 20000
+            
+            weather_multiplier = {'晴れ': 1.1, '曇り': 1.0, '雨': 0.9}[weather]
+            weekend_multiplier = 1.2 if is_weekend else 1.0
+            event_multiplier = {'なし': 1.0, '忘年会': 1.3, '歓送迎会': 1.2, 'クリスマス': 1.4}[has_event]
+            
+            predicted_sales = (base_sales + appointment_bonus + companion_bonus + 
+                             drink_bonus + bottle_bonus) * weather_multiplier * weekend_multiplier * event_multiplier
+            
+            st.session_state.predicted_sales = predicted_sales
+    
+    with col2:
+        st.write("### 予測結果")
+        
+        if 'predicted_sales' in st.session_state:
+            predicted_value = st.session_state.predicted_sales
+            
+            # 予測結果の表示
+            st.metric("予測売上", f"¥{predicted_value:,.0f}")
+            
+            # 予測の内訳を表示
+            st.write("#### 売上内訳")
+            breakdown = {
+                '基本売上': work_hours * 25000,
+                '指名ボーナス': appointments * 15000,
+                '同伴ボーナス': companion * 30000,
+                'ドリンクボーナス': drinks * 2000,
+                'ボトルボーナス': bottles * 20000
+            }
+            
+            for item, amount in breakdown.items():
+                st.write(f"- {item}: ¥{amount:,.0f}")
+            
+            # 予測信頼区間
+            confidence_lower = predicted_value * 0.85
+            confidence_upper = predicted_value * 1.15
+            
+            st.write(f"#### 予測範囲")
+            st.write(f"- 下限: ¥{confidence_lower:,.0f}")
+            st.write(f"- 上限: ¥{confidence_upper:,.0f}")
+            
+            # アドバイス生成
+            st.write("#### 💡 売上向上アドバイス")
+            
+            if appointments < 3:
+                st.write("- 📞 指名を増やすことで売上大幅アップが期待できます")
+            if companion == 0:
+                st.write("- 🍽️ 同伴を取ることで高額売上につながります")
+            if bottles < 2:
+                st.write("- 🍾 ボトルオーダーの提案で単価アップを図りましょう")
+
+def create_detailed_analysis(df):
+    """詳細分析を作成"""
+    
+    st.subheader("📊 詳細分析")
+    
+    tab1, tab2, tab3 = st.tabs(["相関分析", "時間分析", "顧客分析"])
+    
+    with tab1:
+        st.write("### 売上相関分析")
+        
+        # 数値列のみを選択
+        numeric_cols = ['売上金額', '接客時間', '指名数', '同伴数', 'ドリンク数', 'ボトル数']
+        correlation_data = df[numeric_cols].corr()
+        
+        fig = px.imshow(correlation_data, 
+                       text_auto=True,
+                       aspect="auto",
+                       title="売上関連指標の相関係数")
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 相関の解釈
+        st.write("#### 相関分析の解釈")
+        st.write("- **指名数**と売上の相関が最も高い場合、指名獲得が重要")
+        st.write("- **同伴数**との相関が高い場合、同伴営業に注力")
+        st.write("- **接客時間**との相関で効率性を判断")
+    
+    with tab2:
+        st.write("### 時間帯別分析")
+        
+        # 接客時間の分布
+        fig1 = px.histogram(df, x='接客時間', nbins=20,
+                           title="接客時間の分布")
+        st.plotly_chart(fig1, use_container_width=True)
+        
+        # 時間単価の分析
+        df['時間単価'] = df['売上金額'] / df['接客時間']
+        fig2 = px.box(df, x='キャストID', y='時間単価',
+                     title="キャスト別時間単価の分布")
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    with tab3:
+        st.write("### 顧客行動分析")
+        
+        # 指名数とドリンク数の関係
+        fig1 = px.scatter(df, x='指名数', y='ドリンク数', 
+                         size='売上金額', color='キャストID',
+                         title="指名数 vs ドリンク数（バブルサイズ=売上）")
+        st.plotly_chart(fig1, use_container_width=True)
+        
+        # 同伴と売上の関係
+        companion_sales = df.groupby('同伴数')['売上金額'].mean()
+        fig2 = px.bar(x=companion_sales.index, y=companion_sales.values,
+                     title="同伴数別平均売上")
+        st.plotly_chart(fig2, use_container_width=True)
+
+# ダッシュボードの実行部分
+if __name__ == "__main__":
+    create_dashboard()
+```
+
+### Excel形式レポート生成機能
+
+```python
+def create_excel_report(df, file_path="売上分析レポート.xlsx"):
+    """Excel形式の詳細レポートを生成"""
+    
+    with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+        
+        # 1. サマリーシート
+        summary_data = {
+            '指標': ['総売上', '平均日次売上', '総指名数', '平均時間単価', '出勤日数'],
+            '値': [
+                f"¥{df['売上金額'].sum():,.0f}",
+                f"¥{df['売上金額'].mean():,.0f}",
+                f"{df['指名数'].sum():,.0f}",
+                f"¥{(df['売上金額']/df['接客時間']).mean():,.0f}",
+                f"{df['日付'].nunique()}日"
+            ]
+        }
+        
+        pd.DataFrame(summary_data).to_excel(writer, sheet_name='サマリー', index=False)
+        
+        # 2. 日次データ
+        daily_summary = df.groupby('日付').agg({
+            '売上金額': 'sum',
+            '指名数': 'sum',
+            '同伴数': 'sum',
+            '接客時間': 'sum',
+            'キャストID': 'nunique'
+        }).round(0)
+        daily_summary.columns = ['日次売上', '指名数', '同伴数', '総接客時間', '出勤キャスト数']
+        daily_summary.to_excel(writer, sheet_name='日次サマリー')
+        
+        # 3. キャスト別分析
+        cast_summary = df.groupby('キャストID').agg({
+            '売上金額': ['sum', 'mean'],
+            '指名数': ['sum', 'mean'],
+            '同伴数': 'sum',
+            '接客時間': 'sum'
+        }).round(0)
+        
+        cast_summary.columns = ['総売上', '平均売上', '総指名', '平均指名', '総同伴', '総接客時間']
+        cast_summary['時間単価'] = (cast_summary['総売上'] / cast_summary['総接客時間']).round(0)
+        cast_summary.to_excel(writer, sheet_name='キャスト分析')
+        
+        # 4. 詳細データ
+        df.to_excel(writer, sheet_name='詳細データ', index=False)
+        
+        # 5. 予測データ（サンプル）
+        prediction_scenarios = pd.DataFrame({
+            'シナリオ': ['基本', '好調', '最高'],
+            '接客時間': [4, 5, 6],
+            '指名数': [2, 4, 6],
+            '同伴数': [0, 1, 2],
+            '予想売上': [100000, 180000, 280000]
+        })
+        prediction_scenarios.to_excel(writer, sheet_name='売上予測', index=False)
+    
+    print(f"✅ Excelレポートを生成しました: {file_path}")
+
+# レポート生成の実行
+create_excel_report(final_df)
+```
+
+---
+
+## 5. 運用とメンテナンス
+
+### 自動化スクリプト
+
+```python
+import schedule
+import time
+from datetime import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+class AutomationManager:
+    def __init__(self, data_path, model_path):
+        self.data_path = data_path
+        self.model_path = model_path
+        self.processor = CabaretDataProcessor()
+        
+    def daily_data_update(self):
+        """日次データ更新処理"""
+        
+        try:
+            print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 日次更新開始")
+            
+            # 新しいデータの読み込み
+            new_data = self.processor.load_excel_data(self.data_path)
+            
+            if new_data:
+                # データ処理
+                processed_data = self.processor.preprocess_daily_sales(new_data['日次売上'])
+                
+                # 異常値チェック
+                anomalies = self.detect_anomalies(processed_data)
+                
+                if anomalies:
+                    self.send_alert(f"異常値検出: {len(anomalies)}件")
+                
+                print("✅ 日次更新完了")
+                
+        except Exception as e:
+            print(f"❌ 日次更新エラー: {e}")
+            self.send_alert(f"日次更新エラー: {e}")
+    
+    def weekly_model_retrain(self):
+        """週次モデル再学習"""
+        
+        try:
+            print("🤖 週次モデル再学習開始")
+            
+            # データ読み込み
+            data = self.processor.load_excel_data(self.data_path)
+            processed_data = self.processor.preprocess_daily_sales(data['日次売上'])
+            
+            # モデル再学習
+            predictor = SalesPredictionModel()
+            results = predictor.train_models(processed_data)
+            
+            # モデル保存
+            predictor.save_model(self.model_path)
+            
+            # パフォーマンスレポート生成
+            best_r2 = max([result['r2'] for result in results.values()])
+            
+            report = f"週次モデル更新完了\n最高R²スコア: {best_r2:.3f}"
+            self.send_report(report)
+            
+            print("✅ 週次モデル再学習完了")
+            
+        except Exception as e:
+            print(f"❌ 週次再学習エラー: {e}")
+            self.send_alert(f"週次再学習エラー: {e}")
+    
+    def detect_anomalies(self, df, threshold=2.5):
+        """異常値検出"""
+        
+        anomalies = []
+        
+        # 売上金額の異常値
+        sales_mean = df['売上金額'].mean()
+        sales_std = df['売上金額'].std()
+        
+        sales_anomalies = df[
+            (df['売上金額'] > sales_mean + threshold * sales_std) |
+            (df['売上金額'] < sales_mean - threshold * sales_std)
+        ]
+        
+        for _, row in sales_anomalies.iterrows():
+            anomalies.append({
+                'type': '売上異常',
+                'date': row['日付'],
+                'cast': row['キャストID'],
+                'value': row['売上金額'],
+                'threshold': f"平均±{threshold}σ"
+            })
+        
+        return anomalies
+    
+    def send_alert(self, message):
+        """アラート送信"""
+        print(f"🚨 アラート: {message}")
+        # 実際の実装では、メールやSlackなどで通知
+    
+    def send_report(self, message):
+        """レポート送信"""
+        print(f"📊 レポート: {message}")
+        # 実際の実装では、メールで定期レポートを送信
+    
+    def setup_schedule(self):
+        """スケジュール設定"""
+        
+        # 毎日午前6時にデータ更新
+        schedule.every().day.at("06:00").do(self.daily_data_update)
+        
+        # 毎週月曜日午前3時にモデル再学習
+        schedule.every().monday.at("03:00").do(self.weekly_model_retrain)
+        
+        print("⏰ スケジュール設定完了")
+        
+        # スケジュール実行
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # 1分間隔でチェック
+
+# 自動化の実行例
+# automation = AutomationManager("data.xlsx", "model.pkl")
+# automation.setup_schedule()
+```
+
+### データ品質チェック
+
+```python
+class DataQualityChecker:
+    def __init__(self):
+        self.quality_rules = {
+            '売上金額': {'min': 0, 'max': 1000000},
+            '接客時間': {'min': 0, 'max': 12},
+            '指名数': {'min': 0, 'max': 50},
+            '同伴数': {'min': 0, 'max': 10}
+        }
+    
+    def check_data_quality(self, df):
+        """データ品質をチェック"""
+        
+        issues = []
+        
+        # 1. 必須列の存在チェック
+        required_columns = ['日付', 'キャストID', '売上金額', '接客時間']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            issues.append(f"必須列が不足: {missing_columns}")
+        
+        # 2. 欠損値チェック
+        missing_data = df[required_columns].isnull().sum()
+        missing_issues = missing_data[missing_data > 0]
+        
+        if len(missing_issues) > 0:
+            issues.append(f"欠損値あり: {missing_issues.to_dict()}")
+        
+        # 3. 値の範囲チェック
+        for column, rules in self.quality_rules.items():
+            if column in df.columns:
+                out_of_range = df[
+                    (df[column] < rules['min']) | (df[column] > rules['max'])
+                ]
+                
+                if len(out_of_range) > 0:
+                    issues.append(f"{column}の範囲外データ: {len(out_of_range)}件")
+        
+        # 4. 重複データチェック
+        duplicates = df.duplicated(subset=['日付', 'キャストID']).sum()
+        if duplicates > 0:
+            issues.append(f"重複データ: {duplicates}件")
+        
+        # 5. 論理的整合性チェック
+        logical_issues = df[df['売上金額'] < df['接客時間'] * 1000]  # 時給1000円未満
+        if len(logical_issues) > 0:
+            issues.append(f"論理的に不整合: {len(logical_issues)}件（極端に低い時間単価）")
+        
+        return issues
+    
+    def generate_quality_report(self, df):
+        """品質レポートを生成"""
+        
+        issues = self.check_data_quality(df)
+        
+        report = {
+            'total_records': len(df),
+            'quality_issues': issues,
+            'data_completeness': {
+                col: f"{(1 - df[col].isnull().mean()) * 100:.1f}%"
+                for col in df.columns if df[col].dtype in ['float64', 'int64']
+            },
+            'summary': "OK" if len(issues) == 0 else f"{len(issues)}件の問題あり"
+        }
+        
+        return report
+
+# 品質チェックの実行
+quality_checker = DataQualityChecker()
+quality_report = quality_checker.generate_quality_report(final_df)
+
+print("📋 データ品質レポート:")
+print(f"総レコード数: {quality_report['total_records']}")
+print(f"品質状況: {quality_report['summary']}")
+
+if quality_report['quality_issues']:
+    print("\n⚠️ 品質問題:")
+    for issue in quality_report['quality_issues']:
+        print(f"  - {issue}")
+
+print(f"\n✅ データ完全性:")
+for col, completeness in quality_report['data_completeness'].items():
+    print(f"  {col}: {completeness}")
+```
+
+---
+
+## 📋 運用チェックリスト
+
+### 日次運用タスク
+- [ ] 前日の売上データ入力確認
+- [ ] データ品質チェック実行
+- [ ] 異常値・外れ値の確認
+- [ ] ダッシュボードの動作確認
+- [ ] 重要指標の前日比較
+
+### 週次運用タスク
+- [ ] 週次売上サマリーレポート生成
+- [ ] キャスト別パフォーマンス分析
+- [ ] 予測精度の検証
+- [ ] モデルの再学習実行
+- [ ] データバックアップ
+
+### 月次運用タスク
+- [ ] 月次売上分析レポート作成
+- [ ] 季節性・トレンド分析
+- [ ] 予測モデルの精度評価
+- [ ] システム全体の点検
+- [ ] 改善提案の検討
+
+---
+
+## 🚀 発展的な機能追加
+
+### 高度な予測機能
+
+```python
+def advanced_prediction_features():
+    """高度な予測機能の例"""
+    
+    features = {
+        "リアルタイム予測": "現在の状況に基づく即座の売上予測",
+        "シナリオ分析": "異なる条件下での売上シミュレーション", 
+        "最適化提案": "売上最大化のための行動提案",
+        "需要予測": "曜日・季節を考慮した需要予測",
+        "価格最適化": "サービス価格の最適化提案"
+    }
+    
+    print("🔮 追加可能な高度機能:")
+    for feature, description in features.items():
+        print(f"  📈 {feature}: {description}")
+    
+    return features
+
+advanced_prediction_features()
+```
+
+### セキュリティとプライバシー
+
+```python
+def implement_security_measures():
+    """セキュリティ対策の実装例"""
+    
+    security_measures = [
+        "データ暗号化: 個人情報の暗号化保存",
+        "アクセス制御: ユーザー権限の管理",
+        "監査ログ: 操作履歴の記録",
+        "データマスキング: 表示時の個人情報隠蔽",
+        "バックアップ: 定期的なデータバックアップ"
+    ]
+    
+    print("🔒 セキュリティ対策:")
+    for measure in security_measures:
+        print(f"  🛡️ {measure}")
+    
+    return security_measures
+
+implement_security_measures()
+```
+
+---
+
+## 🎯 まとめ
+
+このガイドでは、キャバクラの売上予測とダッシュボード構築について以下の内容を解説しました：
+
+### ✅ 達成できること
+1. **Excel入力からの自動データ処理**
+2. **機械学習による売上予測**  
+3. **リアルタイムダッシュボード**
+4. **自動レポート生成**
+5. **品質管理とアラート機能**
+
+### 💡 ビジネス価値
+- **データ駆動の意思決定**支援
+- **キャスト管理の効率化**
+- **売上向上施策の効果測定**
+- **リスク管理と異常検知**
+- **経営戦略の立案支援**
+
+### 🚀 次のステップ
+1. 実際のデータでのテスト運用
+2. ユーザーフィードバックの収集
+3. 機能の段階的拡張
+4. 他店舗への展開検討
+5. AI機能のさらなる高度化
+
+このシステムを活用することで、データに基づいた効率的な店舗運営が可能になります。
+
+---
+
+*⚠️ 注意: 個人情報の取り扱いには十分注意し、関連法規を遵守してください。*
+
+```python
+print("🎉 売上予測ダッシュボード構築完了！")
+print("📊 データドリブンな経営を始めましょう！")
+```
