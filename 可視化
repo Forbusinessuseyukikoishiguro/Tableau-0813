@@ -1,0 +1,552 @@
+# Tableau × SQL 可視化予測のための実践ガイド
+
+## はじめに
+
+Tableauでの効果的な可視化予測には、データベースレベルでの適切なデータ準備とSQL設計が不可欠です。本ガイドでは、予測分析に適したデータ構造の構築から、Tableauでの高度な予測可視化まで、実践的なSQLテクニックを解説します。
+
+---
+
+## 1. 時系列データの準備
+
+### 1.1 基本的な時系列テーブル設計
+
+```sql
+-- 売上時系列データのベーステーブル
+CREATE TABLE sales_timeseries (
+    date_key DATE NOT NULL,
+    product_id VARCHAR(20) NOT NULL,
+    region_id VARCHAR(10) NOT NULL,
+    sales_amount DECIMAL(12,2) NOT NULL,
+    quantity_sold INTEGER NOT NULL,
+    unit_price DECIMAL(8,2) NOT NULL,
+    promotional_flag BOOLEAN DEFAULT FALSE,
+    seasonal_factor DECIMAL(5,3) DEFAULT 1.000,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (date_key, product_id, region_id)
+);
+
+-- インデックス設定（Tableauパフォーマンス向上）
+CREATE INDEX idx_sales_date ON sales_timeseries(date_key);
+CREATE INDEX idx_sales_product ON sales_timeseries(product_id);
+CREATE INDEX idx_sales_region ON sales_timeseries(region_id);
+```
+
+### 1.2 日付ディメンションテーブル
+
+```sql
+-- 予測分析に必要な日付属性を含むディメンションテーブル
+CREATE TABLE date_dimension (
+    date_key DATE PRIMARY KEY,
+    year_num INTEGER,
+    quarter_num INTEGER,
+    month_num INTEGER,
+    week_num INTEGER,
+    day_of_year INTEGER,
+    day_of_month INTEGER,
+    day_of_week INTEGER,
+    is_weekend BOOLEAN,
+    is_holiday BOOLEAN,
+    season VARCHAR(20),
+    fiscal_year INTEGER,
+    fiscal_quarter INTEGER,
+    -- 予測用の追加フラグ
+    is_historical BOOLEAN DEFAULT TRUE,
+    is_forecast BOOLEAN DEFAULT FALSE
+);
+
+-- 予測期間を含む日付データ生成
+INSERT INTO date_dimension (date_key, year_num, month_num, is_historical, is_forecast)
+SELECT 
+    date_series,
+    EXTRACT(YEAR FROM date_series),
+    EXTRACT(MONTH FROM date_series),
+    CASE WHEN date_series <= CURRENT_DATE THEN TRUE ELSE FALSE END,
+    CASE WHEN date_series > CURRENT_DATE THEN TRUE ELSE FALSE END
+FROM generate_series(
+    '2020-01-01'::date, 
+    '2025-12-31'::date, 
+    '1 day'::interval
+) date_series;
+```
+
+---
+
+## 2. 予測用データ加工SQL
+
+### 2.1 移動平均・トレンド計算
+
+```sql
+-- 予測の基礎となる移動平均・トレンド分析
+WITH sales_with_trends AS (
+    SELECT 
+        s.date_key,
+        s.product_id,
+        s.region_id,
+        s.sales_amount,
+        -- 7日移動平均
+        AVG(s.sales_amount) OVER (
+            PARTITION BY s.product_id, s.region_id 
+            ORDER BY s.date_key 
+            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+        ) as sales_7day_ma,
+        -- 30日移動平均
+        AVG(s.sales_amount) OVER (
+            PARTITION BY s.product_id, s.region_id 
+            ORDER BY s.date_key 
+            ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+        ) as sales_30day_ma,
+        -- 前年同期比
+        LAG(s.sales_amount, 365) OVER (
+            PARTITION BY s.product_id, s.region_id 
+            ORDER BY s.date_key
+        ) as sales_prev_year,
+        -- トレンド計算（線形回帰の傾き近似）
+        (s.sales_amount - LAG(s.sales_amount, 30) OVER (
+            PARTITION BY s.product_id, s.region_id 
+            ORDER BY s.date_key
+        )) / 30.0 as trend_slope
+    FROM sales_timeseries s
+    INNER JOIN date_dimension d ON s.date_key = d.date_key
+    WHERE d.is_historical = TRUE
+),
+-- 季節性指数の計算
+seasonal_factors AS (
+    SELECT 
+        product_id,
+        region_id,
+        EXTRACT(MONTH FROM date_key) as month_num,
+        EXTRACT(DOW FROM date_key) as day_of_week,
+        -- 月別季節性指数
+        AVG(sales_amount) / AVG(AVG(sales_amount)) OVER (
+            PARTITION BY product_id, region_id
+        ) as monthly_seasonal_index,
+        -- 曜日別季節性指数
+        AVG(sales_amount) / AVG(AVG(sales_amount)) OVER (
+            PARTITION BY product_id, region_id
+        ) as weekly_seasonal_index
+    FROM sales_timeseries
+    GROUP BY product_id, region_id, 
+             EXTRACT(MONTH FROM date_key), 
+             EXTRACT(DOW FROM date_key)
+)
+SELECT 
+    st.*,
+    sf.monthly_seasonal_index,
+    sf.weekly_seasonal_index,
+    -- 季節調整後売上
+    st.sales_amount / COALESCE(sf.monthly_seasonal_index, 1.0) as seasonally_adjusted_sales
+FROM sales_with_trends st
+LEFT JOIN seasonal_factors sf ON st.product_id = sf.product_id 
+    AND st.region_id = sf.region_id
+    AND EXTRACT(MONTH FROM st.date_key) = sf.month_num
+    AND EXTRACT(DOW FROM st.date_key) = sf.day_of_week;
+```
+
+### 2.2 シンプルな予測値生成
+
+```sql
+-- 線形トレンド + 季節性による予測
+CREATE VIEW sales_forecast AS
+WITH historical_summary AS (
+    SELECT 
+        product_id,
+        region_id,
+        -- 直近30日の平均売上
+        AVG(sales_amount) as avg_recent_sales,
+        -- トレンド（直近60日の傾き）
+        REGR_SLOPE(sales_amount, 
+                   EXTRACT(EPOCH FROM date_key)/(24*60*60)) as trend_per_day,
+        -- 季節性パターン
+        MAX(date_key) as last_date
+    FROM sales_timeseries 
+    WHERE date_key >= CURRENT_DATE - INTERVAL '60 days'
+    GROUP BY product_id, region_id
+),
+forecast_dates AS (
+    SELECT 
+        d.date_key,
+        d.month_num,
+        d.day_of_week,
+        hs.product_id,
+        hs.region_id,
+        hs.avg_recent_sales,
+        hs.trend_per_day,
+        -- 予測日数（最終履歴日からの日数）
+        EXTRACT(EPOCH FROM d.date_key - hs.last_date)/(24*60*60) as days_ahead
+    FROM date_dimension d
+    CROSS JOIN historical_summary hs
+    WHERE d.is_forecast = TRUE
+    AND d.date_key <= CURRENT_DATE + INTERVAL '90 days' -- 90日先まで予測
+),
+seasonal_patterns AS (
+    SELECT 
+        product_id,
+        region_id,
+        EXTRACT(MONTH FROM date_key) as month_num,
+        EXTRACT(DOW FROM date_key) as day_of_week,
+        AVG(sales_amount) as avg_sales_by_pattern
+    FROM sales_timeseries
+    WHERE date_key >= CURRENT_DATE - INTERVAL '365 days'
+    GROUP BY product_id, region_id, 
+             EXTRACT(MONTH FROM date_key), 
+             EXTRACT(DOW FROM date_key)
+)
+SELECT 
+    fd.date_key,
+    fd.product_id,
+    fd.region_id,
+    -- 基本予測値（トレンド + ベース）
+    fd.avg_recent_sales + (fd.trend_per_day * fd.days_ahead) as base_forecast,
+    -- 季節性調整後予測値
+    (fd.avg_recent_sales + (fd.trend_per_day * fd.days_ahead)) * 
+    COALESCE(sp.avg_sales_by_pattern / fd.avg_recent_sales, 1.0) as seasonal_forecast,
+    -- 信頼区間（簡易版）
+    (fd.avg_recent_sales + (fd.trend_per_day * fd.days_ahead)) * 0.8 as forecast_lower,
+    (fd.avg_recent_sales + (fd.trend_per_day * fd.days_ahead)) * 1.2 as forecast_upper,
+    'FORECAST' as data_type
+FROM forecast_dates fd
+LEFT JOIN seasonal_patterns sp ON fd.product_id = sp.product_id
+    AND fd.region_id = sp.region_id
+    AND fd.month_num = sp.month_num
+    AND fd.day_of_week = sp.day_of_week;
+```
+
+---
+
+## 3. Tableau統合用データマート構築
+
+### 3.1 履歴 + 予測統合ビュー
+
+```sql
+-- Tableauで履歴と予測を一元的に可視化するための統合ビュー
+CREATE VIEW sales_historical_and_forecast AS
+-- 履歴データ部分
+SELECT 
+    s.date_key,
+    s.product_id,
+    s.region_id,
+    s.sales_amount as actual_sales,
+    NULL as forecast_sales,
+    NULL as forecast_lower,
+    NULL as forecast_upper,
+    'ACTUAL' as data_type,
+    d.year_num,
+    d.quarter_num,
+    d.month_num,
+    d.is_weekend,
+    d.is_holiday
+FROM sales_timeseries s
+INNER JOIN date_dimension d ON s.date_key = d.date_key
+WHERE d.is_historical = TRUE
+
+UNION ALL
+
+-- 予測データ部分
+SELECT 
+    f.date_key,
+    f.product_id,
+    f.region_id,
+    NULL as actual_sales,
+    f.seasonal_forecast as forecast_sales,
+    f.forecast_lower,
+    f.forecast_upper,
+    f.data_type,
+    d.year_num,
+    d.quarter_num,
+    d.month_num,
+    d.is_weekend,
+    d.is_holiday
+FROM sales_forecast f
+INNER JOIN date_dimension d ON f.date_key = d.date_key;
+```
+
+### 3.2 精度測定用バックテストビュー
+
+```sql
+-- 予測精度を測定するためのバックテストデータ
+CREATE VIEW forecast_accuracy_backtest AS
+WITH backtest_predictions AS (
+    -- 過去30日間の各日について、その時点での7日先予測を生成
+    SELECT 
+        base_date,
+        target_date,
+        product_id,
+        region_id,
+        predicted_sales,
+        actual_sales,
+        ABS(predicted_sales - actual_sales) as absolute_error,
+        ABS(predicted_sales - actual_sales) / actual_sales as percentage_error
+    FROM (
+        SELECT 
+            s1.date_key as base_date,
+            s2.date_key as target_date,
+            s1.product_id,
+            s1.region_id,
+            -- 簡易予測：7日移動平均をベースにしたトレンド予測
+            AVG(s1.sales_amount) OVER (
+                PARTITION BY s1.product_id, s1.region_id 
+                ORDER BY s1.date_key 
+                ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ) * 1.02 as predicted_sales, -- 2%成長仮定
+            s2.sales_amount as actual_sales
+        FROM sales_timeseries s1
+        INNER JOIN sales_timeseries s2 ON s1.product_id = s2.product_id
+            AND s1.region_id = s2.region_id
+            AND s2.date_key = s1.date_key + INTERVAL '7 days'
+        WHERE s1.date_key >= CURRENT_DATE - INTERVAL '60 days'
+        AND s1.date_key <= CURRENT_DATE - INTERVAL '7 days'
+    ) prediction_data
+    WHERE actual_sales > 0 -- ゼロ除算防止
+)
+SELECT 
+    base_date,
+    target_date,
+    product_id,
+    region_id,
+    predicted_sales,
+    actual_sales,
+    absolute_error,
+    percentage_error,
+    -- 精度カテゴリ分類
+    CASE 
+        WHEN percentage_error <= 0.05 THEN 'Excellent (≤5%)'
+        WHEN percentage_error <= 0.10 THEN 'Good (≤10%)'
+        WHEN percentage_error <= 0.20 THEN 'Fair (≤20%)'
+        ELSE 'Poor (>20%)'
+    END as accuracy_category
+FROM backtest_predictions;
+```
+
+---
+
+## 4. Tableau用カスタムSQL最適化
+
+### 4.1 パフォーマンス最適化クエリ
+
+```sql
+-- Tableauでの高速描画のための事前集約テーブル
+CREATE MATERIALIZED VIEW sales_daily_summary AS
+SELECT 
+    date_key,
+    product_id,
+    region_id,
+    SUM(sales_amount) as daily_sales,
+    SUM(quantity_sold) as daily_quantity,
+    AVG(unit_price) as avg_unit_price,
+    COUNT(*) as transaction_count,
+    -- 7日移動平均（事前計算）
+    AVG(SUM(sales_amount)) OVER (
+        PARTITION BY product_id, region_id 
+        ORDER BY date_key 
+        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) as sales_7day_ma,
+    -- 前年同月比（事前計算）
+    LAG(SUM(sales_amount), 365) OVER (
+        PARTITION BY product_id, region_id 
+        ORDER BY date_key
+    ) as sales_prev_year
+FROM sales_timeseries
+GROUP BY date_key, product_id, region_id;
+
+-- インデックス設定
+CREATE INDEX idx_sales_daily_date ON sales_daily_summary(date_key);
+CREATE INDEX idx_sales_daily_product ON sales_daily_summary(product_id);
+
+-- 定期更新用の関数
+CREATE OR REPLACE FUNCTION refresh_sales_summary()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW sales_daily_summary;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### 4.2 Tableauパラメータ対応クエリ
+
+```sql
+-- Tableauパラメータに対応した動的予測クエリ
+-- (TableauのカスタムSQL内で使用)
+
+-- パラメータ: [Forecast_Days] (予測日数)
+-- パラメータ: [Confidence_Level] (信頼度レベル)
+
+WITH dynamic_forecast AS (
+    SELECT 
+        d.date_key,
+        '<Parameters.Product_Filter>' as product_filter,
+        '<Parameters.Region_Filter>' as region_filter,
+        -- 動的予測期間
+        CASE 
+            WHEN d.date_key <= CURRENT_DATE THEN 'Historical'
+            WHEN d.date_key <= CURRENT_DATE + INTERVAL '<Parameters.Forecast_Days> days' THEN 'Forecast'
+            ELSE 'Extended'
+        END as period_type,
+        -- 動的信頼区間
+        predicted_value * (1 - <Parameters.Confidence_Level>/100.0) as lower_bound,
+        predicted_value as forecast_value,
+        predicted_value * (1 + <Parameters.Confidence_Level>/100.0) as upper_bound
+    FROM date_dimension d
+    LEFT JOIN (
+        -- 基本予測ロジック
+        SELECT 
+            future_date,
+            AVG(historical_sales) * 
+            (1 + growth_rate * days_ahead/365.0) as predicted_value
+        FROM forecast_calculation_base
+    ) fc ON d.date_key = fc.future_date
+    WHERE d.date_key >= CURRENT_DATE - INTERVAL '365 days'
+)
+SELECT * FROM dynamic_forecast
+WHERE product_filter = '<Parameters.Product_Filter>'
+OR '<Parameters.Product_Filter>' = 'All';
+```
+
+---
+
+## 5. Tableau計算フィールドとの連携
+
+### 5.1 予測精度指標の計算
+
+```sql
+-- Tableauで使用する予測精度メトリクス用データ
+CREATE VIEW forecast_metrics AS
+SELECT 
+    product_id,
+    region_id,
+    forecast_date,
+    actual_value,
+    predicted_value,
+    -- MAE (Mean Absolute Error)
+    ABS(actual_value - predicted_value) as absolute_error,
+    -- MAPE (Mean Absolute Percentage Error)
+    CASE 
+        WHEN actual_value != 0 THEN ABS(actual_value - predicted_value) / actual_value 
+        ELSE NULL 
+    END as percentage_error,
+    -- RMSE用の二乗誤差
+    POWER(actual_value - predicted_value, 2) as squared_error,
+    -- 方向性の正確さ
+    CASE 
+        WHEN (actual_value > LAG(actual_value) OVER (ORDER BY forecast_date)) = 
+             (predicted_value > LAG(predicted_value) OVER (ORDER BY forecast_date))
+        THEN 1 ELSE 0 
+    END as direction_accuracy
+FROM (
+    -- 実際値と予測値を結合
+    SELECT 
+        a.date_key as forecast_date,
+        a.product_id,
+        a.region_id,
+        a.sales_amount as actual_value,
+        f.seasonal_forecast as predicted_value
+    FROM sales_timeseries a
+    INNER JOIN sales_forecast f ON a.date_key = f.date_key
+        AND a.product_id = f.product_id
+        AND a.region_id = f.region_id
+    WHERE a.date_key >= CURRENT_DATE - INTERVAL '30 days'
+) comparison_data;
+```
+
+### 5.2 アラート・異常検知用クエリ
+
+```sql
+-- 予測と実績の大幅な乖離を検知
+CREATE VIEW forecast_alerts AS
+WITH alert_conditions AS (
+    SELECT 
+        date_key,
+        product_id,
+        region_id,
+        actual_sales,
+        forecast_sales,
+        ABS(actual_sales - forecast_sales) / forecast_sales as deviation_rate,
+        -- 統計的異常値検知（3σルール）
+        ABS(actual_sales - AVG(actual_sales) OVER (
+            PARTITION BY product_id, region_id
+            ORDER BY date_key
+            ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+        )) / STDDEV(actual_sales) OVER (
+            PARTITION BY product_id, region_id
+            ORDER BY date_key
+            ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+        ) as statistical_outlier_score
+    FROM sales_historical_and_forecast
+    WHERE data_type = 'ACTUAL'
+    AND date_key >= CURRENT_DATE - INTERVAL '7 days'
+)
+SELECT 
+    date_key,
+    product_id,
+    region_id,
+    actual_sales,
+    forecast_sales,
+    deviation_rate,
+    statistical_outlier_score,
+    CASE 
+        WHEN deviation_rate > 0.3 THEN 'High Forecast Deviation'
+        WHEN statistical_outlier_score > 3 THEN 'Statistical Outlier'
+        WHEN actual_sales = 0 AND forecast_sales > 0 THEN 'Zero Sales Alert'
+        ELSE 'Normal'
+    END as alert_type,
+    CASE 
+        WHEN deviation_rate > 0.5 OR statistical_outlier_score > 3 THEN 'Critical'
+        WHEN deviation_rate > 0.3 OR statistical_outlier_score > 2 THEN 'Warning'
+        ELSE 'Info'
+    END as alert_severity
+FROM alert_conditions
+WHERE deviation_rate > 0.2 OR statistical_outlier_score > 2;
+```
+
+---
+
+## 6. Tableauでの活用例
+
+### 6.1 推奨される計算フィールド
+
+**予測トレンドライン**
+```
+// Tableauの計算フィールド
+IF [Data Type] = "FORECAST" THEN [Forecast Sales] 
+ELSE [Actual Sales] 
+END
+```
+
+**精度表示**
+```
+// 予測精度の可視化
+IF [Data Type] = "ACTUAL" AND [Forecast Sales] IS NOT NULL THEN
+    ABS([Actual Sales] - [Forecast Sales]) / [Actual Sales]
+ELSE NULL
+END
+```
+
+**信頼区間表示**
+```
+// 信頼区間のバンド表示
+IF [Data Type] = "FORECAST" THEN
+    [Forecast Upper] - [Forecast Lower]
+ELSE NULL
+END
+```
+
+### 6.2 ダッシュボード設計のポイント
+
+1. **時系列チャート**: 履歴・予測・信頼区間を同一軸で表示
+2. **精度メトリクス**: MAPE、MAE、方向性精度をKPIカードで表示
+3. **アラートパネル**: 異常値・大幅乖離のハイライト表示
+4. **インタラクティブフィルタ**: 商品・地域・期間での動的フィルタリング
+5. **ドリルダウン**: 年→月→日レベルでの詳細分析
+
+---
+
+## まとめ
+
+効果的な予測可視化には、SQLレベルでの適切なデータ準備とTableauでの最適化された表示設計が重要です。時系列データの前処理、予測ロジックの実装、精度測定、そして直感的な可視化まで、一貫したアプローチで取り組むことで、ビジネス価値の高い予測ダッシュボードを構築できます。
+
+特に重要なのは：
+- 履歴データの品質確保
+- 季節性・トレンドの適切な分析
+- 予測精度の継続的な監視
+- ユーザーにとって理解しやすい可視化
+
+これらの要素を組み合わせることで、データドリブンな意思決定を支援する強力な予測分析システムを構築できます。
