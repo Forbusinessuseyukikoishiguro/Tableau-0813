@@ -1,0 +1,204 @@
+# 新人エンジニアのための VS Code + Git 効率化ガイド
+
+## はじめに
+
+エンジニアになったばかりの頃は、VS CodeやGitの操作に慣れるまで時間がかかりますよね。この記事では、実際の開発現場でよく使う機能と、作業を効率化するテクニックを新人エンジニア向けに解説します。
+
+## 1. VS Code の基本セットアップ
+
+### 必須拡張機能
+```
+- GitLens — Git supercharged
+- GitHub Pull Requests and Issues
+- Japanese Language Pack
+- Auto Rename Tag
+- Bracket Pair Colorizer
+- Live Server
+```
+
+### 基本ショートカット（Windows）
+```
+Ctrl + Shift + P  : コマンドパレット
+Ctrl + `          : ターミナル表示/非表示
+Ctrl + Shift + E  : エクスプローラー
+Ctrl + Shift + G  : Gitパネル
+Ctrl + D          : 同じ文字列を追加選択
+Ctrl + /          : コメントアウト
+Alt + ↑/↓        : 行を移動
+F2                : リネーム
+```
+
+## 2. Git の基本概念とフォーク
+
+### Gitの基本用語
+- **リポジトリ**: プロジェクトのコードを管理する場所
+- **コミット**: 変更を記録すること
+- **ブランチ**: 開発の枝分かれ
+- **マージ**: ブランチを統合すること
+- **フォーク**: 他人のリポジトリを自分のアカウントにコピー
+
+### フォークとは？
+フォークは主にオープンソースプロジェクトに貢献する際に使います：
+
+```
+元のリポジトリ（upstream）
+    ↓ Fork
+あなたのリポジトリ（origin）
+    ↓ Clone
+ローカル環境
+```
+
+## 3. 実践的なワークフロー
+
+### オープンソースプロジェクトに貢献する手順
+
+**1. GitHub上でフォーク**
+- プロジェクトページで「Fork」ボタンをクリック
+
+**2. ローカルにクローン**
+```bash
+git clone https://github.com/あなたのユーザー名/プロジェクト名.git
+cd プロジェクト名
+```
+
+**3. アップストリーム設定**
+```bash
+git remote add upstream https://github.com/元のユーザー名/プロジェクト名.git
+git remote -v  # 確認
+```
+
+**4. 作業ブランチ作成**
+```bash
+git checkout -b feature/新機能名
+```
+
+**5. VS Codeでの開発**
+- ファイルを編集
+- `Ctrl + S` で保存
+- `Ctrl + Shift + G` でGitパネル開く
+
+**6. 変更をコミット**
+```bash
+git add .
+git commit -m "feat: 新機能を追加"
+```
+
+**7. プッシュしてPull Request**
+```bash
+git push origin feature/新機能名
+```
+
+## 4. マージコンフリクトの解決
+
+### コンフリクトが発生したら
+1. VS Codeが自動的にマージエディタを表示
+2. 左側：あなたの変更（Current Change）
+3. 右側：相手の変更（Incoming Change）
+4. 下側：結果（Result）
+
+### 解決方法
+- `Accept Current Change`: 自分の変更を採用
+- `Accept Incoming Change`: 相手の変更を採用
+- `Accept Both Changes`: 両方の変更を採用
+- 手動編集: 結果セクションで直接編集
+
+### 解決後
+```bash
+git add .
+git commit -m "resolve: マージコンフリクトを解決"
+```
+
+## 5. 効率化のコツ
+
+### 高速コピペテクニック
+```
+Ctrl + A          # 全選択
+Ctrl + C          # コピー
+Ctrl + V          # ペースト
+Ctrl + X          # 切り取り
+Ctrl + Z          # 元に戻す
+Ctrl + Shift + Z  # やり直し
+```
+
+### 複数行編集
+```
+Alt + Click       # マルチカーソル
+Ctrl + Alt + ↑/↓ # 上下にカーソル追加
+Ctrl + D          # 選択文字列と同じものを追加選択
+Ctrl + Shift + L  # 選択文字列を全て選択
+```
+
+### GitをVS Codeで効率的に使う
+- **ステージング**: ファイル名の横の「+」ボタン
+- **コミット**: メッセージ入力後 `Ctrl + Enter`
+- **プッシュ**: `...` メニューから「Push」
+- **プル**: `...` メニューから「Pull」
+
+## 6. よくあるトラブルと解決法
+
+### 「Permission denied」エラー
+```bash
+# SSH鍵の設定を確認
+ssh -T git@github.com
+
+# HTTPSを使う場合
+git remote set-url origin https://github.com/ユーザー名/リポジトリ名.git
+```
+
+### コミットメッセージを間違えた
+```bash
+# 最新のコミットメッセージを修正
+git commit --amend -m "正しいメッセージ"
+```
+
+### 間違ったブランチにコミットした
+```bash
+# 変更を別のブランチに移動
+git checkout 正しいブランチ名
+git cherry-pick コミットID
+```
+
+## 7. チーム開発のマナー
+
+### コミットメッセージのルール
+```
+feat: 新機能
+fix: バグ修正
+docs: ドキュメント
+style: コードフォーマット
+refactor: リファクタリング
+test: テスト追加
+chore: その他の作業
+```
+
+### Pull Requestのコツ
+- **タイトル**: 何をしたかを簡潔に
+- **説明**: 変更理由と内容を詳しく
+- **レビュワー**: 適切な人を指定
+- **小さく分ける**: 大きな変更は分割する
+
+## 8. さらなる学習リソース
+
+### 公式ドキュメント
+- [Git公式チュートリアル](https://git-scm.com/docs/gittutorial)
+- [VS Code公式ドキュメント](https://code.visualstudio.com/docs)
+- [GitHub Docs](https://docs.github.com/)
+
+### 練習サイト
+- [Learn Git Branching](https://learngitbranching.js.org/?locale=ja)
+- [GitHub Skills](https://skills.github.com/)
+
+## まとめ
+
+VS CodeとGitは最初は難しく感じるかもしれませんが、毎日使っていれば必ず慣れます。重要なのは：
+
+1. **基本操作を覚える**: ショートカットから始める
+2. **実際に使う**: 小さなプロジェクトで練習
+3. **エラーを恐れない**: 間違いは学習の機会
+4. **チームのルールを守る**: コミットメッセージやブランチ戦略
+
+最初は時間がかかっても、慣れてくると開発スピードが格段に上がります。焦らず、一歩ずつ習得していきましょう！
+
+---
+
+*この記事が新人エンジニアの皆さんの助けになれば幸いです。質問や追加したい内容があれば、ぜひフィードバックをお願いします！*
